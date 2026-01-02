@@ -42,23 +42,23 @@ export default function Contact() {
         </div>
 
         {/* Contact Form */}
-        <div className="bg-white p-8 rounded-xl shadow-lg">
-          <h3 className="text-2xl font-semibold mb-6">Send Us a Message</h3>
+        <div className="bg-white p-8 rounded-xl shadow-lg text-black">
+          <h3 className="text-2xl font-semibold mb-6 text-black">Send Us a Message</h3>
           <form className="flex flex-col space-y-4">
             <input
               type="text"
               placeholder="Your Name"
-              className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
             />
             <input
               type="email"
               placeholder="Your Email"
-              className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
             />
             <textarea
               placeholder="Your Message"
               rows="5"
-              className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
             />
             <button
               type="submit"

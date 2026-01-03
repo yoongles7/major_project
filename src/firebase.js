@@ -1,5 +1,10 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  setPersistence,
+  browserSessionPersistence
+} from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCsBsbVsTa-P0VH9KVqyDvLbkM7-9zJ0Uk",
@@ -14,4 +19,8 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
+
+// 🔴 THIS LINE FIXES AUTO LOGIN
+setPersistence(auth, browserSessionPersistence);
 export const googleprovider = new GoogleAuthProvider();
+googleprovider.setCustomParameters({ prompt: "select_account" });

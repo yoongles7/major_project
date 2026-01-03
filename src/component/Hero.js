@@ -1,9 +1,21 @@
 import React from "react";
 import chartImg from "../assets/chart.jpg";
 import { Link, useNavigate } from "react-router-dom";
+import { signInWithPopup } from "firebase/auth";
+import { auth, googleprovider } from "../firebase";
 
 export default function Hero() {
   const navigate = useNavigate();
+    const handleGoogleLogin = async () => {
+   
+      try {
+        const result = await signInWithPopup(auth, googleprovider);
+        console.log("User info:", result.user); // optional
+        navigate("/dashboard"); // redirect after login
+      } catch (error) {
+        console.error("Google login error:", error);
+      }
+    };
   return (
     <section
       id="home"
@@ -30,11 +42,12 @@ export default function Hero() {
           </p>
 
           <button
+          onClick={handleGoogleLogin}
         
           className="px-6 py-3 bg-gray-800 text-white hover:bg-black transition">
-            <Link to="/auth"> 
+      
             Start Trading Free
-            </Link>
+           
           </button>
         </div>
 

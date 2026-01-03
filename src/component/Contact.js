@@ -20,12 +20,12 @@ export default function Contact() {
           <p className="text-lg text-black">📍 Location: Kathmandu, Nepal</p>
 
           <div className="flex space-x-4 mt-4">
-            <a
+            {/* <a
               href="#"
               className="px-4 py-2 bg-blue-500 text-white rounded-lg shadow hover:bg-blue-600 transition"
             >
               Twitter
-            </a>
+            </a> */}
             <a
               href="#"
               className="px-4 py-2 bg-blue-700 text-white rounded-lg shadow hover:bg-blue-800 transition"
@@ -33,7 +33,7 @@ export default function Contact() {
               LinkedIn
             </a>
             <a
-              href="#"
+              href="https://github.com/yoongles7/LSTM-Based-Trading-Trainer-Web-App"
               className="px-4 py-2 bg-gray-900 text-white rounded-lg shadow hover:bg-gray-800 transition"
             >
               GitHub

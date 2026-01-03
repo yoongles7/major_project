@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import SidebarItem from "./SidebarItem";
 import UserPanel from "./UserPanel";
 import LogoutModal from "./LogoutModal";
+import home from "../../pages/Home";
 
 const Sidebar = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -12,14 +13,19 @@ const Sidebar = () => {
 
   const navigate = useNavigate();
 
-  const handleLogoutConfirm = async () => {
-    try {
-      await signOut(auth);
-      navigate("/");
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
-  };
+const handleLogoutConfirm = async () => {
+  try {
+    await signOut(auth);              // 🔴 logout from Firebase
+    localStorage.clear();
+    sessionStorage.clear();
+    setShowLogoutModal(false);        // close modal
+    navigate("/");                    // ✅ GO TO Home.js
+  } catch (error) {
+    console.error("Logout error:", error);
+  }
+};
+
+
 
   return (
     <>

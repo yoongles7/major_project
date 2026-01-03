@@ -30,14 +30,14 @@ const handleLogoutConfirm = async () => {
   return (
     <>
       <div
-        className={`h-screen bg-gray-100 border-r transition-all duration-300
+        className={`h-screen bg-gray-300 text-gray-900 border-r transition-all duration-300
         ${isCollapsed ? "w-16" : "w-64"} p-4 flex flex-col`}
       >
         {/* Top Section */}
         <div>
           {/* Logo + Collapse */}
           <div className="flex items-center justify-between mb-6">
-            {!isCollapsed && <h1 className="text-xl font-bold">LOGO</h1>}
+            {!isCollapsed && <h1 className="text-xl font-bold">StockPredict</h1>}
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
               className="text-gray-600 hover:text-black"
@@ -52,7 +52,7 @@ const handleLogoutConfirm = async () => {
           {/* Menu */}
           <div className="space-y-2">
             <SidebarItem label="Dashboard" icon="📊" to="/dashboard" isCollapsed={isCollapsed} />
-            <SidebarItem label="Profile" icon="📁" to="/dashboard/profile" isCollapsed={isCollapsed} />
+            <SidebarItem label="Portfolio" icon="📁" to="/dashboard/profile" isCollapsed={isCollapsed} />
             <SidebarItem label="PaperTrading" icon="💱" to="/dashboard/paper-trading" isCollapsed={isCollapsed} />
             <SidebarItem label="History" icon="🕘" to="/dashboard/history" isCollapsed={isCollapsed} />
             <SidebarItem label="AITrading" icon="🤖" to="/dashboard/ai-trading" isCollapsed={isCollapsed} />

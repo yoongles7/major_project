@@ -19,10 +19,10 @@ export default function Navbar() {
 
           {/* Desktop Menu */}
           <div className="hidden md:flex space-x-8 text-lg">
-            <a href="#home" className="hover:text-red-400">Home</a>
-            <a href="#about" className="hover:text-red-400">About Us</a>
-            <a href="#features" className="hover:text-red-400">Features</a>
-            <a href="#contact" className="hover:text-red-400">Contact</a>
+            <a href="#home" className="hover:text-blue-600">Home</a>
+            <a href="#about" className="hover:text-blue-600">About Us</a>
+            <a href="#features" className="hover:text-blue-600">Features</a>
+            <a href="#contact" className="hover:text-blue-600">Contact</a>
           </div>
 
           {/* Desktop Login / Signup */}
@@ -30,7 +30,7 @@ export default function Navbar() {
             <Link
               to="/auth"
               className="px-5 py-1.5 border border-white rounded
-                         hover:bg-white hover:text-black transition"
+                         hover:bg-gray-300 hover:text-black transition"
             >
               Login / Signup
             </Link>

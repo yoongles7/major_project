@@ -76,13 +76,13 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
 
-        'NAME': 'railway',
+        'NAME': 'tradin_trainer',
 
-        'USER': 'postgres',
+        'USER': 'yoongles',
 
-        'PASSWORD': 'gNOlnLmywDcljayshuKyhmwyRtRmDvpg',
+        'PASSWORD': 'K@tsuk1!0420',
 
-        'HOST': 'postgres.railway.internal',
+        'HOST': 'localhost',
 
         'PORT': '5432',
     }

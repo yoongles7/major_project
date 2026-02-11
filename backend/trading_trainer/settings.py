@@ -33,6 +33,7 @@ AUTH_USER_MODEL = 'users_authentication.CustomUser'
 # Application definition
 
 INSTALLED_APPS = [
+    'trading.apps.TradingConfig',   # main trading and stocks UI
     'users_authentication.apps.UsersAuthenticationConfig',     # users and authentication app
     'rest_framework_simplejwt', 
     'django.contrib.admin',

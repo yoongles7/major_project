@@ -27,17 +27,34 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
+# Constants
+AUTH_USER_MODEL = 'users_authentication.CustomUser'
 
 # Application definition
 
 INSTALLED_APPS = [
+    'users_authentication.apps.UsersAuthenticationConfig',     # users and authentication app
+    'rest_framework_simplejwt', 
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
 ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+}
+
+from datetime import timedelta
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -76,7 +93,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
 
-        'NAME': 'tradin_trainer',
+        'NAME': 'trading_trainer',
 
         'USER': 'yoongles',
 

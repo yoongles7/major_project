@@ -18,3 +18,19 @@ class Portfolio(models.Model):
     
     def __str__(self):
         return f"{self.user.email}'s Portfolio"
+    
+class Trade(models.Model):
+    BUY = 'BUY'
+    SELL = 'SELL'
+    ORDER_TYPES = [(BUY, 'Buy'), (SELL, 'Sell')]
+    
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    stock = models.ForeignKey(Stock, on_delete=models.PROTECT)
+    quantity = models.PositiveIntegerField()
+    price_per_share = models.DecimalField(max_digits=10, decimal_places=2)
+    order_type = models.CharField(max_length=4, choices=ORDER_TYPES)
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-timestamp']

@@ -9,3 +9,12 @@ class Stock(models.Model):
     
     def __str__(self):
         return f"{self.symbol} - {self.name}"
+    
+class Portfolio(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    cash_balance = models.DecimalField(max_digits=12, decimal_places=2, default=100000)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.user.email}'s Portfolio"

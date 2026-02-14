@@ -6,4 +6,5 @@ urlpatterns = [
     path("", views.index, name="index"),
     path("stocks/", views.StockListView.as_view(), name="stocks"),
     path("portfolio/", views.PortfolioView.as_view(), name="portfolio"),
+    path("holdings/", views.HoldingsListView.as_view(), name="holdings"),
 ]

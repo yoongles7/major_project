@@ -1,11 +1,10 @@
 from django.http import HttpResponse
-from .models import Stock, Portfolio, Trade
-from .serializers import StockSerializer, PortfolioSerializer, TradeSerializer
+from .models import Stock, Portfolio, Trade, Holding
+from .serializers import StockSerializer, PortfolioSerializer, TradeSerializer, HoldingSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-
 
 def index(request):
     return HttpResponse("Hello, This is trading UI!")
@@ -47,4 +46,33 @@ class PortfolioView(APIView):
                 'total_sells': total_sells,
             },
             'recent_trades': TradeSerializer(recent_trades, many=True).data
+        })
+        
+class HoldingsListView(APIView):
+    """
+    GET: Get all holdings for logged-in user
+    Shows what stocks user owns with current values
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        # Get all holdings for this user
+        holdings = Holding.objects.filter(user=request.user)
+        
+        # Calculate total portfolio value
+        total_portfolio_value = request.user.portfolio.cash_balance
+        for holding in holdings:
+            total_portfolio_value += holding.current_value
+        
+        # Serialize holdings
+        serializer = HoldingSerializer(holdings, many=True)
+        
+        return Response({
+            'holdings': serializer.data,
+            'summary': {
+                'total_holdings_count': holdings.count(),
+                'total_portfolio_value': total_portfolio_value,
+                'cash_balance': request.user.portfolio.cash_balance,
+                'stocks_value': total_portfolio_value - request.user.portfolio.cash_balance
+            }
         })

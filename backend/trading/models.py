@@ -1,4 +1,6 @@
 from django.db import models
+from django.conf import settings
+from decimal import Decimal
 
 class Stock(models.Model):
     symbol = models.CharField(max_length=10, unique=True)  # E.g., 'NIC', 'NMB'
@@ -75,3 +77,96 @@ class Trade(models.Model):
     
     class Meta:
         ordering = ['-timestamp']  # Show newest first
+        
+class Holding(models.Model):
+    """
+    Tracks how many shares a user owns of a specific stock
+    One record per user per stock they own
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE,
+        related_name='holdings'
+    )
+    stock = models.ForeignKey(
+        'Stock', 
+        on_delete=models.CASCADE,
+        related_name='holdings'
+    )
+    
+    # Core fields
+    quantity = models.PositiveIntegerField(default=0)  # Number of shares owned
+    average_buy_price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=0
+    )  # Average price paid per share
+    
+    # Calculated fields (updated on each trade)
+    total_invested = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0
+    )  # Total money spent on this stock
+    
+    # Meta data
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        # Ensure one record per user per stock
+        unique_together = ['user', 'stock']
+        ordering = ['-updated_at']
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.stock.symbol}: {self.quantity} shares"
+    
+    @property
+    def current_value(self):
+        """Current market value of these holdings"""
+        return self.quantity * self.stock.current_price
+    
+    @property
+    def profit_loss(self):
+        """Profit/Loss on this holding"""
+        return self.current_value - self.total_invested
+    
+    @property
+    def profit_loss_percentage(self):
+        """Profit/Loss as percentage"""
+        if self.total_invested > 0:
+            return (self.profit_loss / self.total_invested) * 100
+        return 0
+    
+    def update_after_buy(self, quantity_bought, price_per_share):
+        """
+        Update holding after a buy order
+        Calculates new average price correctly
+        """
+        # Calculate new values
+        new_total_invested = self.total_invested + (quantity_bought * price_per_share)
+        new_quantity = self.quantity + quantity_bought
+        
+        # Update fields
+        self.quantity = new_quantity
+        self.total_invested = new_total_invested
+        self.average_buy_price = new_total_invested / new_quantity
+        self.save()
+    
+    def update_after_sell(self, quantity_sold, price_per_share):
+        """
+        Update holding after a sell order
+        Reduces quantity but keeps average price same
+        """
+        # Calculate proportion being sold
+        proportion_sold = quantity_sold / self.quantity
+        
+        # Reduce invested amount proportionally
+        self.total_invested -= (self.total_invested * proportion_sold)
+        self.quantity -= quantity_sold
+        
+        if self.quantity == 0:
+            # If no shares left, delete this holding record
+            self.delete()
+        else:
+            self.save()

@@ -138,6 +138,19 @@ class Holding(models.Model):
             return (self.profit_loss / self.total_invested) * 100
         return 0
     
+    def update_current_value(self):
+        """Update current value and profit/loss based on latest stock price"""
+        self.current_value = self.quantity * self.stock.current_price
+        self.profit_loss = self.current_value - self.total_invested
+        self.save()
+        return self.current_value
+    
+    def get_profit_loss_percentage(self):
+        """Calculate profit/loss as percentage"""
+        if self.total_invested == 0:
+            return 0
+        return (self.profit_loss / self.total_invested) * 100
+    
     def update_after_buy(self, quantity_bought, price_per_share):
         """
         Update holding after a buy order

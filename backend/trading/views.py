@@ -1,5 +1,6 @@
 from django.http import HttpResponse
 from django.db import transaction
+from django.utils import timezone
 from .models import Stock, Portfolio, Trade, Holding
 from .serializers import StockSerializer, PortfolioSerializer, TradeSerializer, HoldingSerializer
 from rest_framework.views import APIView
@@ -53,30 +54,62 @@ class PortfolioView(APIView):
         
 class HoldingsListView(APIView):
     """
-    GET: Get all holdings for logged-in user
-    Shows what stocks user owns with current values
+    Get user's current holdings with real-time values
+    GET /api/trading/holdings/
     """
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        # Get all holdings for this user
-        holdings = Holding.objects.filter(user=request.user)
+        user = request.user
+        holdings = Holding.objects.filter(user=user).select_related('stock')
         
-        # Calculate total portfolio value
-        total_portfolio_value = request.user.portfolio.cash_balance
+        holdings_data = []
+        total_stock_value = 0
+        total_invested = 0
+        
         for holding in holdings:
-            total_portfolio_value += holding.current_value
+            # Update with latest price
+            current_price = holding.stock.current_price
+            current_value = holding.quantity * current_price
+            profit_loss = current_value - holding.total_invested
+            profit_loss_percent = (profit_loss / holding.total_invested * 100) if holding.total_invested > 0 else 0
+            
+            holdings_data.append({
+                'symbol': holding.stock.symbol,
+                'company_name': holding.stock.name,
+                'quantity': holding.quantity,
+                'average_buy_price': float(holding.average_buy_price),
+                'current_price': float(current_price),
+                'current_value': float(current_value),
+                'total_invested': float(holding.total_invested),
+                'profit_loss': float(profit_loss),
+                'profit_loss_percentage': round(profit_loss_percent, 2),
+                'day_change': 0,  # Will add later with NEPSE API
+            })
+            
+            total_stock_value += current_value
+            total_invested += holding.total_invested
         
-        # Serialize holdings
-        serializer = HoldingSerializer(holdings, many=True)
+        # Get cash balance from portfolio
+        portfolio = user.portfolio
+        cash_balance = portfolio.cash_balance
+        
+        # Calculate totals
+        total_portfolio_value = cash_balance + total_stock_value
+        total_profit_loss = total_stock_value - total_invested
+        total_profit_loss_percent = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
         
         return Response({
-            'holdings': serializer.data,
+            'holdings': holdings_data,
             'summary': {
-                'total_holdings_count': holdings.count(),
-                'total_portfolio_value': total_portfolio_value,
-                'cash_balance': request.user.portfolio.cash_balance,
-                'stocks_value': total_portfolio_value - request.user.portfolio.cash_balance
+                'cash_balance': float(cash_balance),
+                'stock_value': float(total_stock_value),
+                'total_portfolio_value': float(total_portfolio_value),
+                'total_invested': float(total_invested),
+                'total_profit_loss': float(total_profit_loss),
+                'total_profit_loss_percentage': round(total_profit_loss_percent, 2),
+                'number_of_holdings': len(holdings_data),
+                'last_updated': timezone.now().isoformat()
             }
         })
         
@@ -293,3 +326,133 @@ class SellOrderView(APIView):
                 "timestamp": trade.timestamp.isoformat()
             }
         }, status=status.HTTP_200_OK)
+        
+class TradeHistoryView(APIView):
+    """
+    Get user's trade history
+    GET /api/trading/history/
+    Optional query params: ?limit=10&page=1
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        
+        # Get query parameters for pagination
+        limit = int(request.GET.get('limit', 50))
+        page = int(request.GET.get('page', 1))
+        offset = (page - 1) * limit
+        
+        # Get trades ordered by most recent
+        trades = Trade.objects.filter(user=user)\
+            .select_related('stock')\
+            .order_by('-timestamp')
+        
+        # Apply pagination
+        total_trades = trades.count()
+        paginated_trades = trades[offset:offset + limit]
+        
+        # Serialize trade data
+        trades_data = []
+        for trade in paginated_trades:
+            trades_data.append({
+                'id': trade.id,
+                'symbol': trade.stock.symbol,
+                'company_name': trade.stock.name,
+                'order_type': trade.order_type,
+                'quantity': trade.quantity,
+                'price_per_share': float(trade.price_per_share),
+                'total_amount': float(trade.total_amount),
+                'timestamp': trade.timestamp.isoformat(),
+                'status': 'COMPLETED',  # Could add more statuses later
+            })
+        
+        return Response({
+            'trades': trades_data,
+            'pagination': {
+                'total': total_trades,
+                'page': page,
+                'limit': limit,
+                'pages': (total_trades + limit - 1) // limit
+            }
+        })
+        
+class DashboardSummaryView(APIView):
+    """
+    Get all data needed for frontend dashboard in one call
+    GET /api/trading/dashboard/
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        
+        # Get portfolio basics
+        portfolio = user.portfolio
+        cash_balance = portfolio.cash_balance
+        
+        # Get holdings
+        holdings = Holding.objects.filter(user=user).select_related('stock')
+        
+        # Calculate stock value
+        stock_value = 0
+        top_holding = None
+        max_value = 0
+        
+        for holding in holdings:
+            current_value = holding.quantity * holding.stock.current_price
+            stock_value += current_value
+            
+            # Find top holding
+            if current_value > max_value:
+                max_value = current_value
+                top_holding = {
+                    'symbol': holding.stock.symbol,
+                    'name': holding.stock.name,
+                    'value': float(current_value),
+                    'quantity': holding.quantity
+                }
+        
+        # Get recent trades (last 5)
+        recent_trades = Trade.objects.filter(user=user)\
+            .select_related('stock')\
+            .order_by('-timestamp')[:5]
+        
+        recent_trades_data = []
+        for trade in recent_trades:
+            recent_trades_data.append({
+                'symbol': trade.stock.symbol,
+                'type': trade.order_type,
+                'quantity': trade.quantity,
+                'amount': float(trade.total_amount),
+                'time_ago': self.get_time_ago(trade.timestamp)
+            })
+        
+        return Response({
+            'portfolio': {
+                'cash_balance': float(cash_balance),
+                'stock_value': float(stock_value),
+                'total_value': float(cash_balance + stock_value),
+                'top_holding': top_holding
+            },
+            'recent_trades': recent_trades_data,
+            'quick_stats': {
+                'total_trades': Trade.objects.filter(user=user).count(),
+                'holdings_count': holdings.count(),
+                'today_pnl': 0,  # Will implement later
+            }
+        })
+    
+    def get_time_ago(self, timestamp):
+        """Helper to format time ago"""
+        from django.utils import timezone
+        diff = timezone.now() - timestamp
+        
+        if diff.days > 0:
+            return f"{diff.days}d ago"
+        elif diff.seconds > 3600:
+            return f"{diff.seconds // 3600}h ago"
+        elif diff.seconds > 60:
+            return f"{diff.seconds // 60}m ago"
+        else:
+            return "Just now"

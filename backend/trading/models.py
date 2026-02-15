@@ -158,15 +158,19 @@ class Holding(models.Model):
         Update holding after a sell order
         Reduces quantity but keeps average price same
         """
-        # Calculate proportion being sold
-        proportion_sold = quantity_sold / self.quantity
+        # Ensure quantity_sold is Decimal for consistent math
+        if not isinstance(quantity_sold, Decimal):
+            quantity_sold = Decimal(str(quantity_sold))
         
-        # Reduce invested amount proportionally
-        self.total_invested -= (self.total_invested * proportion_sold)
+        # Calculate amount to remove from total_invested
+        # This is more accurate than using proportion
+        amount_to_remove = self.average_buy_price * quantity_sold
+        
+        # Update fields
+        self.total_invested -= amount_to_remove
         self.quantity -= quantity_sold
         
         if self.quantity == 0:
-            # If no shares left, delete this holding record
             self.delete()
         else:
             self.save()

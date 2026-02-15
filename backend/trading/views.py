@@ -198,3 +198,98 @@ class BuyOrderView(APIView):
                 "error": "Trade failed",
                 "detail": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            s
+class SellOrderView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request):
+        user = request.user
+        symbol = request.data.get('symbol', '').upper()
+        quantity = int(request.data.get('quantity', 0))
+        
+        # ========== VALIDATION ==========
+        if quantity <= 0:
+            return Response(
+                {"error": "Quantity must be greater than 0"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            holding = Holding.objects.get(
+                user=user, 
+                stock__symbol=symbol
+            )
+        except Holding.DoesNotExist:
+            return Response(
+                {"error": f"You don't own any shares of {symbol}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if holding.quantity < quantity:
+            return Response(
+                {"error": f"Insufficient shares. You own {holding.quantity} shares"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # ========== GET CURRENT PRICE ==========
+        stock = holding.stock
+        current_price = stock.current_price
+        total_value = current_price * quantity
+        
+        # ========== CREATE SELL TRADE ==========
+        trade = Trade.objects.create(
+            user=user,
+            stock=stock,
+            quantity=quantity,
+            price_per_share=current_price,
+            order_type=Trade.OrderType.SELL,
+            total_amount=total_value
+        )
+        
+        # ========== USE YOUR MODEL'S METHOD ==========
+        # This is the KEY - use the method you already created!
+        holding.update_after_sell(quantity, current_price)
+        # Note: You don't need to update current_value or profit_loss
+        # They're properties that calculate automatically!
+        
+        # ========== UPDATE CASH BALANCE ==========
+        portfolio = user.portfolio
+        portfolio.cash_balance += total_value
+        portfolio.save()
+        
+        # ========== CHECK IF HOLDING STILL EXISTS ==========
+        # After update_after_sell, holding might be deleted if quantity became 0
+        try:
+            # Try to get the holding again
+            updated_holding = Holding.objects.get(
+                user=user, 
+                stock__symbol=symbol
+            )
+            remaining_shares = updated_holding.quantity
+            new_avg_price = float(updated_holding.average_buy_price)
+            new_total_invested = float(updated_holding.total_invested)
+        except Holding.DoesNotExist:
+            # Holding was deleted (all shares sold)
+            remaining_shares = 0
+            new_avg_price = 0
+            new_total_invested = 0
+        
+        # ========== RETURN RESPONSE ==========
+        return Response({
+            "success": True,
+            "message": f"Successfully sold {quantity} shares of {symbol}",
+            "data": {
+                "symbol": symbol,
+                "company_name": stock.name,
+                "quantity_sold": quantity,
+                "price_per_share": float(current_price),
+                "total_received": float(total_value),
+                "remaining_balance": float(portfolio.cash_balance),
+                "remaining_shares": remaining_shares,
+                "new_average_price": new_avg_price,
+                "total_invested_remaining": new_total_invested,
+                "trade_id": trade.id,
+                "timestamp": trade.timestamp.isoformat()
+            }
+        }, status=status.HTTP_200_OK)

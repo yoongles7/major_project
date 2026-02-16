@@ -11,31 +11,65 @@ class Stock(models.Model):
     
     def __str__(self):
         return f"{self.symbol} - {self.name}"
-
 class Portfolio(models.Model):
-    """
-    Tracks user's virtual money and portfolio summary
-    One-to-One relationship with User
-    """
-    user = models.OneToOneField(
-        'users_authentication.CustomUser',  # Reference your custom user model
-        on_delete=models.CASCADE,
-        related_name='portfolio'
-    )
-    cash_balance = models.DecimalField(
-        max_digits=12, 
-        decimal_places=2, 
-        default=100000.00,  # Start with Rs. 100,000
-        help_text="Virtual cash available for trading"
-    )
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    cash_balance = models.DecimalField(max_digits=12, decimal_places=2, default=100000.00)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     def __str__(self):
-        return f"{self.user.email}'s Portfolio (Balance: Rs.{self.cash_balance})"
+        return f"{self.user.email}'s Portfolio"
     
-    class Meta:
-        verbose_name_plural = "Portfolios"
+    # === NEW METHODS START HERE ===
+    
+    def get_holdings(self):
+        """Get all holdings for this portfolio"""
+        return self.user.holdings.all()
+    
+    def get_total_stock_value(self):
+        """Calculate current value of all stocks owned"""
+        total = Decimal('0.00')
+        for holding in self.get_holdings():
+            # Current market value = quantity * current stock price
+            current_value = holding.quantity * holding.stock.current_price
+            total += current_value
+        return total
+    
+    def get_total_invested(self):
+        """Calculate total money invested in stocks (buy price)"""
+        total = Decimal('0.00')
+        for holding in self.get_holdings():
+            total += holding.total_invested
+        return total
+    
+    def get_total_portfolio_value(self):
+        """Total value = cash + current stock value"""
+        return self.cash_balance + self.get_total_stock_value()
+    
+    def get_total_profit_loss(self):
+        """Total P&L = current value - invested amount"""
+        return self.get_total_stock_value() - self.get_total_invested()
+    
+    def get_profit_loss_percentage(self):
+        """P&L as percentage of invested amount"""
+        invested = self.get_total_invested()
+        if invested == 0:
+            return Decimal('0.00')
+        pl = self.get_total_profit_loss()
+        return (pl / invested) * 100
+    
+    def get_portfolio_summary(self):
+        """Get complete portfolio summary as dictionary"""
+        return {
+            'cash_balance': float(self.cash_balance),
+            'total_invested': float(self.get_total_invested()),
+            'total_stock_value': float(self.get_total_stock_value()),
+            'total_portfolio_value': float(self.get_total_portfolio_value()),
+            'total_profit_loss': float(self.get_total_profit_loss()),
+            'profit_loss_percentage': float(self.get_profit_loss_percentage()),
+            'holdings_count': self.get_holdings().count(),
+            'last_updated': self.updated_at.isoformat()
+        }
         
 class Trade(models.Model):
     """

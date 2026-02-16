@@ -1,18 +1,24 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.contrib.auth import get_user_model
+from .models import CustomUser
 from trading.models import Portfolio
 
-User = get_user_model()
-
-@receiver(post_save, sender=User)
+@receiver(post_save, sender=CustomUser)
 def create_user_portfolio(sender, instance, created, **kwargs):
-    """
-    When a new user is created, automatically create their portfolio
-    """
+    """Create a portfolio whenever a new user is created"""
     if created:
         Portfolio.objects.create(
             user=instance,
-            cash_balance=100000.00  # Start with Rs. 100,000
+            cash_balance=100000.00  # Default starting money
         )
-        print(f"✓ Created portfolio for {instance.email}")  # Debug message
+        print(f"Portfolio created for user: {instance.email}")
+
+@receiver(post_save, sender=CustomUser)
+def save_user_portfolio(sender, instance, **kwargs):
+    """This runs on every save, but portfolio already exists"""
+    # If for some reason portfolio doesn't exist, create it
+    if not hasattr(instance, 'portfolio'):
+        Portfolio.objects.create(
+            user=instance,
+            cash_balance=100000.00
+        )

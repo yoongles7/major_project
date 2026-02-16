@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings
 from decimal import Decimal
+from datetime import datetime, timedelta
 
 class Stock(models.Model):
     symbol = models.CharField(max_length=10, unique=True)  # E.g., 'NIC', 'NMB'
@@ -128,7 +129,7 @@ class Holding(models.Model):
         related_name='holdings'
     )
     
-    # Core fields
+    # Core fields (YOUR EXISTING FIELDS - KEEP THEM)
     quantity = models.PositiveIntegerField(default=0)  # Number of shares owned
     average_buy_price = models.DecimalField(
         max_digits=10, 
@@ -143,6 +144,10 @@ class Holding(models.Model):
         default=0
     )  # Total money spent on this stock
     
+    # NEW FIELDS FOR ENHANCED TRACKING
+    first_purchase_date = models.DateTimeField(null=True, blank=True)
+    last_purchase_date = models.DateTimeField(auto_now=True)
+    
     # Meta data
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -151,9 +156,17 @@ class Holding(models.Model):
         # Ensure one record per user per stock
         unique_together = ['user', 'stock']
         ordering = ['-updated_at']
+        
+        # NEW: Add indexes for faster queries
+        indexes = [
+            models.Index(fields=['user', 'stock']),
+            models.Index(fields=['user', '-updated_at']),
+        ]
     
     def __str__(self):
         return f"{self.user.email} - {self.stock.symbol}: {self.quantity} shares"
+    
+    # === YOUR EXISTING PROPERTIES (KEEP ALL OF THESE) ===
     
     @property
     def current_value(self):
@@ -172,18 +185,7 @@ class Holding(models.Model):
             return (self.profit_loss / self.total_invested) * 100
         return 0
     
-    def update_current_value(self):
-        """Update current value and profit/loss based on latest stock price"""
-        self.current_value = self.quantity * self.stock.current_price
-        self.profit_loss = self.current_value - self.total_invested
-        self.save()
-        return self.current_value
-    
-    def get_profit_loss_percentage(self):
-        """Calculate profit/loss as percentage"""
-        if self.total_invested == 0:
-            return 0
-        return (self.profit_loss / self.total_invested) * 100
+    # === YOUR EXISTING METHODS (KEEP ALL OF THESE) ===
     
     def update_after_buy(self, quantity_bought, price_per_share):
         """
@@ -198,6 +200,11 @@ class Holding(models.Model):
         self.quantity = new_quantity
         self.total_invested = new_total_invested
         self.average_buy_price = new_total_invested / new_quantity
+        
+        # Set first purchase date if this is the first buy
+        if not self.first_purchase_date:
+            self.first_purchase_date = datetime.now()
+        
         self.save()
     
     def update_after_sell(self, quantity_sold, price_per_share):
@@ -210,7 +217,6 @@ class Holding(models.Model):
             quantity_sold = Decimal(str(quantity_sold))
         
         # Calculate amount to remove from total_invested
-        # This is more accurate than using proportion
         amount_to_remove = self.average_buy_price * quantity_sold
         
         # Update fields
@@ -221,3 +227,110 @@ class Holding(models.Model):
             self.delete()
         else:
             self.save()
+    
+    def update_current_value(self):
+        """Update current value and profit/loss based on latest stock price"""
+        self.current_value = self.quantity * self.stock.current_price
+        self.profit_loss = self.current_value - self.total_invested
+        self.save()
+        return self.current_value
+    
+    # === NEW ENHANCED METHODS (ADD THESE) ===
+    
+    def get_current_value(self):
+        """Same as property but as method for consistency"""
+        return self.quantity * self.stock.current_price
+    
+    def get_days_held(self):
+        """Number of days since first purchase"""
+        if not self.first_purchase_date:
+            return 0
+        delta = datetime.now() - self.first_purchase_date
+        return delta.days
+    
+    def get_annualized_return(self):
+        """
+        Calculate annualized return percentage
+        Useful for comparing performance across different holding periods
+        """
+        if self.total_invested == 0 or self.get_days_held() == 0:
+            return 0
+        
+        total_return = float(self.profit_loss) / float(self.total_invested)
+        days_held = self.get_days_held()
+        
+        # Annualized return = (1 + total_return)^(365/days) - 1
+        annualized = ((1 + total_return) ** (365 / days_held)) - 1
+        
+        return annualized * 100
+    
+    def get_breakdown_by_purchase(self):
+        """
+        Get breakdown of different purchase lots
+        Requires separate Lot model - advanced feature
+        """
+        from .models import Trade
+        buy_trades = Trade.objects.filter(
+            user=self.user,
+            stock=self.stock,
+            order_type='BUY'
+        ).order_by('timestamp')
+        
+        lots = []
+        remaining_quantity = self.quantity
+        
+        for trade in buy_trades:
+            if remaining_quantity <= 0:
+                break
+            
+            # This is simplified - actual lot tracking needs FIFO logic
+            lots.append({
+                'date': trade.timestamp,
+                'quantity': trade.quantity,
+                'price': float(trade.price_per_share),
+                'total': float(trade.total_amount)
+            })
+        
+        return lots
+    
+    def to_dict(self):
+        """
+        Convert holding to dictionary for API responses
+        This is what frontend will use
+        """
+        return {
+            # Stock info
+            'symbol': self.stock.symbol,
+            'company_name': self.stock.name,
+            'sector': self.stock.sector,
+            
+            # Holding details
+            'quantity': self.quantity,
+            'average_buy_price': float(self.average_buy_price),
+            'total_invested': float(self.total_invested),
+            
+            # Current values
+            'current_price': float(self.stock.current_price),
+            'current_value': float(self.get_current_value()),
+            
+            # Performance metrics
+            'profit_loss': float(self.profit_loss),
+            'profit_loss_percentage': float(self.profit_loss_percentage),
+            'days_held': self.get_days_held(),
+            'annualized_return': float(self.get_annualized_return()),
+            
+            # Dates
+            'first_purchased': self.first_purchase_date.isoformat() if self.first_purchase_date else None,
+            'last_updated': self.updated_at.isoformat(),
+            
+            # Weight in portfolio (calculated later)
+            'portfolio_weight': 0  # Will be set by PortfolioService
+        }
+    
+    def calculate_portfolio_weight(self, total_portfolio_value):
+        """
+        Calculate what percentage of portfolio this holding represents
+        """
+        if total_portfolio_value == 0:
+            return 0
+        return (self.get_current_value() / total_portfolio_value) * 100

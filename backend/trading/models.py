@@ -4,7 +4,7 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 
 class Stock(models.Model):
-    symbol = models.CharField(max_length=10, unique=True)  # E.g., 'NIC', 'NMB'
+    symbol = models.CharField(max_length=20, unique=True)  # E.g., 'NIC', 'NMB'
     name = models.CharField(max_length=200)
     current_price = models.DecimalField(max_digits=10, decimal_places=2)
     sector = models.CharField(max_length=100, blank=True)

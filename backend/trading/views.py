@@ -585,3 +585,52 @@ class DashboardSummaryView(APIView):
             return f"{diff.seconds // 60}m ago"
         else:
             return "Just now"
+
+class CurrentPriceView(APIView):
+    """Get current price for one or multiple stocks"""
+    
+    def get(self, request, symbol=None):
+        if symbol:
+            # Single stock
+            price_data = NepseClient.get_stock_price(symbol)
+            if price_data:
+                return Response({
+                    'symbol': symbol,
+                    'price': price_data['price'],
+                    'change': price_data.get('change', 0)
+                })
+            return Response({'error': 'Not found'}, status=404)
+        
+        # Multiple stocks (from query params)
+        symbols = request.GET.getlist('symbols[]')
+        if symbols:
+            prices = {}
+            live_data = NepseClient.get_live_prices()
+            if live_data:
+                for item in live_data:
+                    if item.get('symbol') in symbols:
+                        prices[item['symbol']] = {
+                            'price': item.get('lastTradedPrice'),
+                            'change': item.get('percentChange')
+                        }
+            return Response(prices)
+        
+        # Get all prices
+        live_data = NepseClient.get_live_prices()
+        return Response(live_data or [])
+    
+class MarketStatusView(APIView):
+    """Check if market is open"""
+    
+    def get(self, request):
+        from services.market_hours import is_market_open
+        import datetime
+        import pytz
+        
+        nepali_time = datetime.datetime.now(pytz.timezone('Asia/Kathmandu'))
+        
+        return Response({
+            'is_open': is_market_open(),
+            'current_time': nepali_time.isoformat(),
+            'market_hours': 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT'
+        })

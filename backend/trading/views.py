@@ -113,10 +113,25 @@ class HoldingsListView(APIView):
             }
         })
         
+# trading/views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from django.db import transaction
+from trading.models import Stock, Trade, Portfolio, Holding
+from services.nepse_client import NepseClient
+from services.price_updater import update_stock_price
+from services.market_hours import is_market_open
+import logging
+
+logger = logging.getLogger(__name__)
+
 class BuyOrderView(APIView):
     """
     POST: Place a buy order
     Required data: symbol, quantity
+    Uses real NEPSE API for price
     """
     permission_classes = [IsAuthenticated]
     
@@ -138,100 +153,214 @@ class BuyOrderView(APIView):
         # Validate quantity
         try:
             quantity = int(quantity_str)
+            if quantity <= 0:
+                raise ValueError
         except ValueError:
             return Response(
-                {"error": "Quantity must be a number"},
+                {"error": "Quantity must be a positive number"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # === STEP 2: Validate stock exists ===
+        # === STEP 2: CHECK MARKET HOURS (Optional but recommended) ===
+        if not is_market_open():
+            return Response({
+                "warning": "Market is currently closed. Order will be processed when market opens.",
+                "market_hours": "NEPSE: Sunday-Thursday, 11:00 AM - 3:00 PM NPT"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # === STEP 3: GET REAL-TIME PRICE FROM NEPSE API ===
         try:
-            stock = Stock.objects.get(symbol=symbol)
-        except Stock.DoesNotExist:
-            return Response(
-                {"error": f"Stock with symbol '{symbol}' not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            # Try to get live price from NEPSE API
+            price_data = NepseClient.get_stock_price(symbol)
+            
+            if price_data and price_data.get('price'):
+                current_price = price_data['price']
+                price_source = 'nepse_api_live'
+                price_change = price_data.get('change', 0)
+            else:
+                # Fallback to database price
+                try:
+                    stock = Stock.objects.get(symbol=symbol)
+                    current_price = stock.current_price
+                    price_source = 'database_cache'
+                    price_change = 0
+                except Stock.DoesNotExist:
+                    return Response({
+                        "error": f"Stock with symbol '{symbol}' not found in our database",
+                        "suggestion": "Please check the symbol or sync stocks first"
+                    }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error fetching price for {symbol}: {e}")
+            # Final fallback - use database price
+            try:
+                stock = Stock.objects.get(symbol=symbol)
+                current_price = stock.current_price
+                price_source = 'database_fallback'
+                price_change = 0
+            except Stock.DoesNotExist:
+                return Response({
+                    "error": f"Cannot get price for {symbol}. API and database both unavailable.",
+                    "detail": str(e)
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         
-        # === STEP 3: Validate order parameters ===
-        validation_errors = validate_buy_order(stock, quantity)
-        if validation_errors:
-            return Response(
-                {"errors": validation_errors},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # === STEP 4: GET OR CREATE STOCK IN DATABASE ===
+        stock, created = Stock.objects.get_or_create(
+            symbol=symbol,
+            defaults={
+                'name': f'{symbol} (NEPSE Stock)',
+                'current_price': current_price,
+                'sector': 'Unknown'
+            }
+        )
         
-        # === STEP 4: Calculate cost and check balance ===
-        current_price = stock.current_price
+        # Update stock price if we got fresh data
+        if price_source != 'database_cache':
+            stock.current_price = current_price
+            stock.save()
+        
+        # === STEP 5: Calculate cost and check balance ===
         total_cost = current_price * quantity
         
         # Get user's portfolio (created automatically via signal)
         portfolio = user.portfolio
         
-        if not can_user_afford(user, total_cost):
+        if portfolio.cash_balance < total_cost:
             return Response({
                 "error": "Insufficient balance",
                 "required": float(total_cost),
-                "available": float(portfolio.cash_balance)
+                "available": float(portfolio.cash_balance),
+                "short_by": float(total_cost - portfolio.cash_balance)
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # === STEP 5: Execute the buy order (ALL DATABASE UPDATES INSIDE TRANSACTION) ===
+        # === STEP 6: Execute the buy order (ALL DATABASE UPDATES INSIDE TRANSACTION) ===
         try:
-            # 5.1 Create trade record
+            # 6.1 Create trade record
             trade = Trade.objects.create(
                 user=user,
                 stock=stock,
                 quantity=quantity,
                 price_per_share=current_price,
                 order_type=Trade.OrderType.BUY,
-                total_amount=total_cost
+                total_amount=total_cost,
+                price_source=price_source  # Add this field to Trade model
             )
             
-            # 5.2 Update portfolio cash balance
+            # 6.2 Update portfolio cash balance
             portfolio.cash_balance -= total_cost
             portfolio.save()
             
-            # 5.3 Update holdings (CREATE or UPDATE)
-            holding, is_new_holding = update_holdings_after_buy(
+            # 6.3 Update holdings (CREATE or UPDATE)
+            holding, is_new_holding = self.update_holdings_after_buy(
                 user=user,
                 stock=stock,
                 quantity=quantity,
                 price_per_share=current_price
             )
             
-            # === STEP 6: Prepare success response ===
+            # === STEP 7: Calculate updated portfolio summary ===
+            total_invested = self.calculate_total_invested(user)
+            total_current_value = self.calculate_current_portfolio_value(user)
+            
+            # === STEP 8: Prepare success response ===
             response_data = {
                 "success": True,
                 "message": f"Successfully bought {quantity} shares of {symbol}",
+                "price_info": {
+                    "price_per_share": float(current_price),
+                    "total_cost": float(total_cost),
+                    "price_source": price_source,
+                    "price_change_percent": price_change,
+                    "timestamp": trade.timestamp.isoformat()
+                },
                 "trade_details": {
                     "trade_id": trade.id,
                     "symbol": symbol,
                     "quantity": quantity,
-                    "price_per_share": float(current_price),
-                    "total_cost": float(total_cost),
-                    "timestamp": trade.timestamp.isoformat()
+                    "order_type": "BUY"
                 },
                 "portfolio_update": {
                     "new_balance": float(portfolio.cash_balance),
-                    "total_invested": float(portfolio.cash_balance)  # You'll calculate this properly later
+                    "total_invested": float(total_invested),
+                    "total_portfolio_value": float(total_current_value),
+                    "total_profit_loss": float(total_current_value - total_invested)
                 },
                 "holding_update": {
                     "is_new_holding": is_new_holding,
                     "total_shares_owned": holding.quantity,
                     "average_price": float(holding.average_buy_price),
-                    "total_invested_in_stock": float(holding.total_invested)
+                    "current_value": float(holding.quantity * current_price),
+                    "unrealized_profit_loss": float(
+                        (holding.quantity * current_price) - holding.total_invested
+                    )
                 }
             }
+            
+            # Add warning if price came from cache
+            if price_source in ['database_cache', 'database_fallback']:
+                response_data["warning"] = "Price may be delayed. Using last known price from database."
             
             return Response(response_data, status=status.HTTP_201_CREATED)
             
         except Exception as e:
             # If anything fails, the transaction rolls back automatically
+            logger.error(f"Buy order failed for user {user.id}, stock {symbol}: {str(e)}")
             return Response({
-                "error": "Trade failed",
-                "detail": str(e)
+                "error": "Trade failed due to server error",
+                "detail": str(e) if settings.DEBUG else "Please try again later"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            s
+    
+    def update_holdings_after_buy(self, user, stock, quantity, price_per_share):
+        """
+        Helper method to update holdings after a buy order
+        Returns: (holding_object, is_new_holding)
+        """
+        total_cost = price_per_share * quantity
+        
+        try:
+            # Try to get existing holding
+            holding = Holding.objects.get(user=user, stock=stock)
+            
+            # Calculate new average price
+            new_quantity = holding.quantity + quantity
+            new_total_invested = holding.total_invested + total_cost
+            new_avg_price = new_total_invested / new_quantity
+            
+            # Update holding
+            holding.quantity = new_quantity
+            holding.average_buy_price = new_avg_price
+            holding.total_invested = new_total_invested
+            holding.current_value = new_quantity * stock.current_price
+            holding.profit_loss = holding.current_value - new_total_invested
+            holding.save()
+            
+            return holding, False
+            
+        except Holding.DoesNotExist:
+            # Create new holding
+            holding = Holding.objects.create(
+                user=user,
+                stock=stock,
+                quantity=quantity,
+                average_buy_price=price_per_share,
+                total_invested=total_cost,
+                current_value=quantity * stock.current_price,
+                profit_loss=0  # Initially no profit/loss
+            )
+            return holding, True
+    
+    def calculate_total_invested(self, user):
+        """Calculate total money invested across all holdings"""
+        holdings = Holding.objects.filter(user=user)
+        return sum(holding.total_invested for holding in holdings)
+    
+    def calculate_current_portfolio_value(self, user):
+        """Calculate current value of all holdings + cash"""
+        holdings_value = 0
+        for holding in Holding.objects.filter(user=user):
+            # Use current stock price
+            holdings_value += holding.quantity * holding.stock.current_price
+        
+        return user.portfolio.cash_balance + holdings_value
 class SellOrderView(APIView):
     permission_classes = [IsAuthenticated]
     

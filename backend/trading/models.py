@@ -106,10 +106,33 @@ class Trade(models.Model):
         default=OrderStatus.COMPLETED  # Start simple
     )
     timestamp = models.DateTimeField(auto_now_add=True)
-    
+    price_source = models.CharField(
+        max_length=20,
+        choices=[
+            ('nepse_api_live', 'Live NEPSE API'),
+            ('nepse_api_cached', 'Cached NEPSE API'),
+            ('database_cache', 'Database Cache'),
+            ('database_fallback', 'Emergency Fallback'),
+            ('mock_data', 'Mock Data (Development)')
+        ],
+        default='mock_data',
+        help_text="Where the price came from"
+    )
+        
     def __str__(self):
         return f"{self.order_type} {self.quantity} {self.stock.symbol} @ Rs.{self.price_per_share}"
     
+    class OrderStatus(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        EXECUTED = 'EXECUTED', 'Executed'
+        FAILED = 'FAILED', 'Failed'
+        CANCELLED = 'CANCELLED', 'Cancelled'
+    
+    status = models.CharField(
+        max_length=10,
+        choices=OrderStatus.choices,
+        default=OrderStatus.EXECUTED
+    )
     class Meta:
         ordering = ['-timestamp']  # Show newest first
         

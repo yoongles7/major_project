@@ -11,7 +11,7 @@ class NepseClient:
     
     # Mock data for when API is down/market closed
     MOCK_PRICES = {
-        'NABIL': {'price': 850.50, 'change': 1.25},
+        'NABIL': {'price': 1850.50, 'change': 1.25},
         'NIC': {'price': 420.75, 'change': -0.50},
         'NMB': {'price': 210.30, 'change': 0.75},
         'SCB': {'price': 650.25, 'change': 0.00},
@@ -52,12 +52,11 @@ class NepseClient:
         # Try cache first
         cached = cache.get(cache_key)
         if cached:
+            logger.debug("Returning cached live prices")
             return cached
         
-        # Check if market is open
-        market_open = cls.is_market_open()
-        
         try:
+            logger.debug("Fetching live prices from API...")
             response = requests.get(
                 f"{cls.BASE_URL}/LiveMarket",
                 timeout=5
@@ -65,56 +64,70 @@ class NepseClient:
             
             if response.status_code == 200:
                 data = response.json()
+                logger.info(f"API returned {len(data)} stocks")
                 
-                # If market is open but data is empty, wait a bit
-                if market_open and not data:
-                    logger.info("Market is open but no data yet, will retry later")
-                    return cls.get_mock_prices()
-                
-                # If market is closed and data is empty, use mock
-                if not market_open and not data:
-                    logger.info("Market closed, using mock data")
-                    mock_data = cls.get_mock_prices()
-                    cache.set(cache_key, mock_data, 300)  # Cache for 5 minutes
-                    return mock_data
-                
-                # If we have real data, use it
-                if data:
-                    cache.set(cache_key, data, 30)  # Cache for 30 seconds
+                if data and len(data) > 0:
+                    # Log sample for debugging
+                    sample = data[0]
+                    logger.debug(f"Sample data: {sample.get('symbol')} = {sample.get('lastTradedPrice')}")
+                    
+                    # Cache for 30 seconds
+                    cache.set(cache_key, data, 30)
                     return data
+                else:
+                    logger.warning("API returned empty data")
+            else:
+                logger.warning(f"API returned status {response.status_code}")
                 
         except Exception as e:
-            logger.warning(f"Live market fetch failed: {e}")
+            logger.error(f"Live market fetch failed: {e}")
         
         # Return mock data if API fails
+        logger.info("Using mock data as fallback")
         mock_data = cls.get_mock_prices()
-        cache.set(cache_key, mock_data, 60)  # Cache mock data for 1 minute
+        cache.set(cache_key, mock_data, 60)
         return mock_data
     
     @classmethod
     def get_stock_price(cls, symbol):
         """Get price for specific stock"""
+        logger.debug(f"Getting price for {symbol}")
+        
         # Try live data first
         live_data = cls.get_live_prices()
         if live_data:
             for item in live_data:
                 if item.get('symbol') == symbol:
-                    return {
-                        'price': item.get('lastTradedPrice', item.get('price')),
-                        'change': item.get('percentChange', 0)
+                    price_data = {
+                        'price': item.get('lastTradedPrice'),  # API uses lastTradedPrice
+                        'change': item.get('percentageChange'),  # API uses percentageChange
+                        'high': item.get('highPrice'),
+                        'low': item.get('lowPrice'),
+                        'volume': item.get('totalTradeQuantity'),
+                        'open': item.get('openPrice'),
+                        'prev_close': item.get('previousClose')
                     }
+                    logger.debug(f"Found {symbol}: ₹{price_data['price']}")
+                    return price_data
         
         # Fallback to mock data
         if symbol in cls.MOCK_PRICES:
+            logger.debug(f"Using mock data for {symbol}")
             return cls.MOCK_PRICES[symbol]
         
+        logger.warning(f"No price found for {symbol}")
         return None
     
     @classmethod
     def get_mock_prices(cls):
         """Return mock prices for testing"""
         return [
-            {"symbol": k, "lastTradedPrice": v['price'], "percentChange": v['change']}
+            {
+                "symbol": k, 
+                "lastTradedPrice": v['price'], 
+                "percentageChange": v['change'],
+                "companyName": f"{k} Company"
+            }
             for k, v in cls.MOCK_PRICES.items()
         ]
     
@@ -133,13 +146,6 @@ class NepseClient:
         
         # Return mock stock list
         return [
-            {"symbol": k, "companyName": f"{v} Company", "sector": "Various"}
-            for k, v in {
-                "NABIL": "Nabil Bank",
-                "NIC": "NIC Asia Bank",
-                "NMB": "NMB Bank",
-                "SCB": "Standard Chartered",
-                "NTC": "Nepal Telecom",
-                "HDL": "Himalayan Distillery",
-            }.items()
+            {"symbol": k, "companyName": f"{k} Company", "sectorName": "Various"}
+            for k in cls.MOCK_PRICES.keys()
         ]

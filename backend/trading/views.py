@@ -15,6 +15,44 @@ def index(request):
 
 class StockListView(APIView):
     def get(self, request):
+        # Try to get live prices
+        live_data = NepseClient.get_live_prices()
+        
+        if live_data:
+            # Create price map from live data
+            price_map = {}
+            for item in live_data:
+                symbol = item.get('symbol')
+                price = item.get('lastTradedPrice')  # API uses lastTradedPrice
+                if symbol and price:
+                    price_map[symbol] = float(price)
+            
+            # Get all stocks from database
+            stocks = Stock.objects.all()
+            
+            # Prepare response data
+            stock_data = []
+            for stock in stocks:
+                stock_dict = {
+                    'id': stock.id,
+                    'symbol': stock.symbol,
+                    'name': stock.name,
+                    'sector': stock.sector,
+                    'last_updated': stock.last_updated,
+                }
+                
+                # Use live price if available
+                if stock.symbol in price_map:
+                    stock_dict['current_price'] = price_map[stock.symbol]
+                else:
+                    # Use database price
+                    stock_dict['current_price'] = float(stock.current_price) if stock.current_price else 0
+                
+                stock_data.append(stock_dict)
+            
+            return Response(stock_data)
+        
+        # Fallback to database only
         stocks = Stock.objects.all()
         serializer = StockSerializer(stocks, many=True)
         return Response(serializer.data)

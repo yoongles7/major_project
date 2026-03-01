@@ -15,7 +15,7 @@ urlpatterns = [
     path("sell/", views.SellOrderView.as_view(), name="sell"),
     path("history/", views.TradeHistoryView.as_view(), name="trading_istory"),
     path("dashboard/", views.DashboardSummaryView.as_view(), name="dashboard_summary"),
-    path("stocks/<str:symbol>/price/", views.CurrentPriceView.as_view(), name="current-price"),
+    path("stocks/<str:symbol>/", views.CurrentPriceView.as_view(), name="current-price"),
     path("market-status/", views.MarketStatusView.as_view(), name="market-status"), 
     
     path('portfolio/dashboard/', PortfolioDashboardView.as_view(), name='portfolio-dashboard'),

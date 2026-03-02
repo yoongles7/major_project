@@ -40,7 +40,7 @@ Authorization: Bearer <your_access_token>
     "email": "example@example.com",
     "password": "your_password",
     "password_confirmation": "your_password"
-  }
+   }
    
    Success Response (201 Created)
    ```json

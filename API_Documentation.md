@@ -24,26 +24,26 @@
 
 ### How to Authenticate
 1. **Login** → Get `access` and `refresh` tokens
-2. **Store** tokens in localStorage/sessionStorage
-3. **Include** token in all requests:
+2. **Store** → tokens in localStorage/sessionStorage
+3. **Include** → token in all requests:
 
 Authorization: Bearer <your_access_token>
 
 ## Authentication Endpoints
 
-1. **/users_authentication/register/** : Create new account
+1. ### /users_authentication/register/ : Create new account
    
-   Request
-   ```json
+   **Request**
+   ```
    {
     "username": "your_username",
     "email": "example@example.com",
     "password": "your_password",
     "password_confirmation": "your_password"
    }
-   
-   Success Response (201 Created)
-   ```json
+   ```
+   **Success Response (201 Created)**
+   ```
    {
     "user": {
         "id": 1,
@@ -54,49 +54,52 @@ Authorization: Bearer <your_access_token>
     "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
     }
-
-    Error Response (400 Bad Request)
-    ```json
+    ```
+    **Error Response (400 Bad Request)**
+    ```
     {
     "username": ["A user with that username already exists."],
     "password": ["This password is too common."]
     }
+    ```
 
-2. **/users_authentication/login/** : login to existing account
+2. ### /users_authentication/login/ : login to existing account
    
-   ### Request
+   **Request**
    ```
    {
     "username": "your_username", 
     "password": "your_password"
    }
-
-   ### Success Response (200 OK)
+   ```
+   **Success Response (200 OK)**
    ```
    {
     "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
    }
+   ```
 
-3. **/users_authentication/refresh/** : Refresh token when expired
+3. ### /users_authentication/refresh/ : Refresh token when expired
     
-   ### Request
+   **Request**
    ```
    {
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."  
    }
-
-   ### Success Response (200 OK)
+   ```
+   **Success Response (200 OK)**
    ```
    {
     "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
    }
+   ```
 
 ## Stock Data Endpoints
 
-1. **/trading/stocks/** : List of stocks
+1. ### /trading/stocks/ : List of stocks
    
-   ### Success Response (200 OK)
+   **Success Response (200 OK)**
    ```
    {
     "count": 150,
@@ -129,34 +132,37 @@ Authorization: Bearer <your_access_token>
         }
     ]
     }
+    ```
 
-2. **/trading/stocks/{symbol}/** : Single stock details
+2. ### /trading/stocks/{symbol}/ : Single stock details
    
-   ### Sucess Response (200 OK)
+   **Sucess Response (200 OK)**
    ```
    {
     "symbol": "SCB",
     "price": 650.25,
     "change": 0.0
    }
+   ```
 
 
 ## Trading Endpoints
 
-1. **/trading/buy/** : to buy stocks
+1. ### /trading/buy/ : to buy stocks
    
-   ### Headers
+   **Headers**
    ```
    Authorization: Bearer <access_token>
-
-   ### Request 
+   ```
+   **Request** 
    ```
    {
     "symbol": "NIC",
     "quantity": 10
    }
-
-   ### Success Response (201 Created)
+   ```
+   **Success Response (201 Created)**
+   ```
    {
     "trade_id": 101,
     "message": "Successfully bought 10 shares of NIC",
@@ -177,9 +183,8 @@ Authorization: Bearer <your_access_token>
         "profit_loss": 0
     }
     }
-
-    ### Error Response 
-
+    ```
+    **Error Response**
     1. Insufficient Balance (400 Bad Request)
     ```
     {
@@ -188,7 +193,7 @@ Authorization: Bearer <your_access_token>
     "required": 100000.00,
     "code": "insufficient_funds"
     }
-
+    ```
     2. Market Closed (400 Bad Request)
     ```
     {
@@ -197,29 +202,30 @@ Authorization: Bearer <your_access_token>
     "next_open": "2024-01-16T11:00:00Z",
     "code": "market_closed"
     }
-
+    ```
     3. Invalid Quantity (400 Bad Request)
     ```
     {
     "error": "Quantity must be greater than 0",
     "code": "invalid_quantity"
     }
+    ```
 
-2. **/trading/sell/** : sell your holdings/stocks
+2. ### /trading/sell/ : sell your holdings/stocks
    
-   ### Headers
+   **Headers**
    ```
    Authorization: Bearer <access_token>
-
-   ### Request 
+   ```
+   **Request**
    ```
    {
     "symbol": "NIC",
     "quantity": 5
    }
-
-   ### Success Response (201 Created)
-
+   ```
+   **Success Response (201 Created)**
+   ```
    {
     "trade_id": 102,
     "message": "Successfully sold 5 shares of NIC",
@@ -240,16 +246,15 @@ Authorization: Bearer <your_access_token>
         "profit_loss": 12.75
     }
     }
-
-    ### Error Response
-    
+    ```
+    **Error Response**
     1. No Holdings (400 Bad Request)
     ```
     {
     "error": "You don't own any shares of NIC",
     "code": "no_holdings"
     }
-
+    ```
     2. Insufficient Shares (400 Bad Request)
     ```
     {
@@ -258,14 +263,15 @@ Authorization: Bearer <your_access_token>
     "requested": 10,
     "code": "insufficient_shares"
     }
+    ```
 
-3. **/trading/holdings/** : Get user's holdings
+3. ### /trading/holdings/ : Get user's holdings
    
-   ### Headers
+   **Headers**
    ```
    Authorization: Bearer <access_token>
-
-   ### Success Response (200 OK)
+   ```
+   **Success Response (200 OK)**
    ```
    {
     "holdings": [],
@@ -280,23 +286,24 @@ Authorization: Bearer <your_access_token>
         "last_updated": "2026-03-02T12:47:30.475277+00:00"
     }
     }
+    ```
 
-4. **/trading/holdings/{symbol}/** : Get user's holdings
+4. ### /trading/holdings/{symbol}/ : Get user's holdings
    
-   ### Headers
+   Headers**
    ```
    Authorization: Bearer <access_token>
-
-   ### Success Response (200 OK)
+   ```
+   **Success Response (200 OK)**
    ```
 
-5. **/trading/history/** : get trades history
+5. ### /trading/history/ : get trades history
 
-   ### Headers
+   **Headers**
    ```
    Authorization: Bearer <access_token>
-
-   ### Success Response (200 OK)
+   ```
+   **Success Response (200 OK)**
    ```
    {
     "count": 25,
@@ -327,17 +334,18 @@ Authorization: Bearer <your_access_token>
         }
     ]
     }
+    ```
 
 
 ## Portfolio Endpoints        
 
-1. **/trading/portfolio/** : Get portfolio
+1. ### /trading/portfolio/ : Get portfolio
    
-   ### Headers
+   **Headers**
    ```
    Authorization: Bearer <access_token>
-
-   ### Success Response (200 OK)
+   ```
+   **Success Response (200 OK)**
    ```
    {
     "portfolio": {
@@ -357,14 +365,15 @@ Authorization: Bearer <your_access_token>
     },
     "recent_trades": []
     }
+    ```
 
-2. **/trading/portfolio/performance/** : get portfolio performance metrics
+2. ### /trading/portfolio/performance/ : get portfolio performance metrics
    
-   ### Headers
+   **Headers**
    ```
    Authorization: Bearer <access_token>
-
-   ### Success Response (200 OK)
+   ```
+   **Success Response (200 OK)**
    ```
    {
     "timeline": [
@@ -379,14 +388,15 @@ Authorization: Bearer <your_access_token>
     ],
     "period": "30_days"
     }
+    ```
 
-3. **/trading/portfolio/dashboard/** : get portfolio summary
+3. ### /trading/portfolio/dashboard/ : get portfolio summary
    
-   ### Headers
+   **Headers**
    ```
    Authorization: Bearer <access_token>
-
-   ### Success Response (200 OK)
+   ```
+   **Success Response (200 OK)**
    ```
    {
     "summary": {
@@ -410,16 +420,18 @@ Authorization: Bearer <your_access_token>
         "sector_allocation": []
     }
     }
+    ```
 
 
 ## Market Data Endpoints
 
-1. **/trading/market-status/** : Get live market status
+1. ### /trading/market-status/ : Get live market status
 
-   ### Success Response (200 OK)
+   **Success Response (200 OK)**
    ```
    {
     "is_open": false,
     "current_time": "2026-03-02T18:22:49.525687+05:45",
     "market_hours": "Sunday-Thursday, 11:00 AM - 3:00 PM NPT"
    }
+   ```

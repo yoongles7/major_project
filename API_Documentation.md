@@ -33,16 +33,16 @@ Authorization: Bearer <your_access_token>
 
 1. **/users_authentication/register/** : Create new account
    
-   **Request**
+   Request
    ```json
    {
     "username": "your_username",
     "email": "example@example.com",
     "password": "your_password",
     "password_confirmation": "your_password"
-}
+  }
    
-   **Success Response (201 Created)**
+   Success Response (201 Created)
    ```json
    {
     "user": {
@@ -55,8 +55,8 @@ Authorization: Bearer <your_access_token>
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
     }
 
-    ### Error Response (400 Bad Request)
-    ```
+    Error Response (400 Bad Request)
+    ```json
     {
     "username": ["A user with that username already exists."],
     "password": ["This password is too common."]

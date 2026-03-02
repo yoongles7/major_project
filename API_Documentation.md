@@ -34,16 +34,16 @@ Authorization: Bearer <your_access_token>
 1. **/users_authentication/register/** : Create new account
    
    ### Request 
-   ```
+   ```json
    {
     "username": "your_username",
     "email": "example@example.com",
     "password": "your_password",
     "password_confirmation": "your_password"
    }
-
-   ### Success Response (201 Created)
-   ```
+   
+### Success Response (201 Created)
+   ```json
    {
     "user": {
         "id": 1,

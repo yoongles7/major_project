@@ -1,7 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 
 import Home from "./pages/Home";
-import LoginSignup from "./component/LoginSignup";
 
 import DashboardLayout from "./component/layout/DashboardLayout";
 import Dashboard from "./pages/Dashboard";
@@ -10,14 +9,14 @@ import PaperTrading from "./pages/PaperTrading";
 import AITrading from "./pages/AITrading";
 import AccountDetails from "./pages/AccountDetails";
 import History from "./pages/History";
+import Auth from "./pages/Auth";
 
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/auth" element={<LoginSignup />} />
+      <Route path="/auth" element={<Auth />} />
 
-      {/* DASHBOARD LAYOUT */}
       <Route path="/dashboard" element={<DashboardLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="profile" element={<Profile />} />

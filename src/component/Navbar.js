@@ -32,7 +32,7 @@ export default function Navbar() {
               className="px-5 py-1.5 border border-white rounded
                          hover:bg-gray-300 hover:text-black transition"
             >
-              Login / Signup
+              Sign in
             </Link>
           </div>
 

@@ -5,10 +5,11 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import CustomUser
-from .serializers import UserSerializer, RegisterSerializer, LoginSerializer
+from .serializers import UserSerializer, RegisterSerializer, LoginSerializer, UserDetailsSerializer
+
 
 def index(request):
     return HttpResponse("Hello, world. You're at users and authentication section.")
@@ -55,3 +56,15 @@ class LoginView(APIView):
             )
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class UserDetailsView(APIView):
+    """
+    GET /api/users/me/
+    Returns: Just username and email of logged-in user
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        # request.user is the logged-in user
+        serializer = UserDetailsSerializer(request.user)
+        return Response(serializer.data)

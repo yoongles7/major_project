@@ -21,48 +21,91 @@ def index(request):
 
 class StockListView(APIView):
     def get(self, request):
-        # Try to get live prices
-        live_data = NepseClient.get_live_prices()
+        # 1. CHECK MARKET STATUS FIRST
+        market_status = NepseClient.get_market_status()
         
-        if live_data:
-            # Create price map from live data
-            price_map = {}
-            for item in live_data:
-                symbol = item.get('symbol')
-                price = item.get('lastTradedPrice')  # API uses lastTradedPrice
-                if symbol and price:
-                    price_map[symbol] = float(price)
-            
-            # Get all stocks from database
-            stocks = Stock.objects.all()
-            
-            # Prepare response data
-            stock_data = []
-            for stock in stocks:
-                stock_dict = {
-                    'id': stock.id,
-                    'symbol': stock.symbol,
-                    'name': stock.name,
-                    'sector': stock.sector,
-                    'last_updated': stock.last_updated,
-                }
-                
-                # Use live price if available
-                if stock.symbol in price_map:
-                    stock_dict['current_price'] = price_map[stock.symbol]
-                else:
-                    # Use database price
-                    stock_dict['current_price'] = float(stock.current_price) if stock.current_price else 0
-                
-                stock_data.append(stock_dict)
-            
-            return Response(stock_data)
+        # 2. GET ALL STOCKS FROM DATABASE (always available)
+        stocks = Stock.objects.exclude(current_price__lte=0)
         
-        # Fallback to database only
-        stocks = Stock.objects.all()
-        serializer = StockSerializer(stocks, many=True)
-        return Response(serializer.data)
-
+        # 3. PREPARE RESPONSE WITH MARKET INFO
+        response_data = {
+            'market_status': market_status,
+            'stocks': [],
+            'total_active_stocks': stocks.count(),
+            'message': ''
+        }
+        
+        # 4. IF MARKET IS OPEN - TRY TO GET LIVE PRICES
+        if market_status and market_status.get('isOpen'):
+            logger.info("Market is OPEN - fetching live prices")
+            live_data = NepseClient.get_live_prices()
+            
+            if live_data:
+                # Create price map from live data
+                price_map = {}
+                for item in live_data:
+                    symbol = item.get('symbol')
+                    price = item.get('lastTradedPrice')
+                    change = item.get('percentageChange', 0)
+                    
+                    if symbol and price:
+                        price_map[symbol] = {
+                            'price': float(price),
+                            'change': float(change) if change else 0,
+                            'high': float(item.get('highPrice', 0)) if item.get('highPrice') else None,
+                            'low': float(item.get('lowPrice', 0)) if item.get('lowPrice') else None,
+                            'volume': item.get('totalTradeQuantity', 0)
+                        }
+                
+                # Build stock data with live prices
+                for stock in stocks:
+                    stock_dict = {
+                        'id': stock.id,
+                        'symbol': stock.symbol,
+                        'name': stock.name,
+                        'sector': stock.sector,
+                    }
+                    
+                    # Use live price if available
+                    if stock.symbol in price_map:
+                        stock_dict['current_price'] = price_map[stock.symbol]['price']
+                        stock_dict['change'] = price_map[stock.symbol]['change']
+                        stock_dict['high'] = price_map[stock.symbol]['high']
+                        stock_dict['low'] = price_map[stock.symbol]['low']
+                        stock_dict['volume'] = price_map[stock.symbol]['volume']
+                        stock_dict['price_source'] = 'live'
+                    else:
+                        # Fallback to database price
+                        stock_dict['current_price'] = float(stock.current_price) if stock.current_price else 0
+                        stock_dict['change'] = 0
+                        stock_dict['price_source'] = 'last_known'
+                    
+                    response_data['stocks'].append(stock_dict)
+                
+                return Response(response_data)
+            else:
+                logger.warning("Market open but no live data - using last known")
+        
+        # 5. MARKET IS CLOSED OR NO LIVE DATA - SHOW LAST KNOWN PRICES
+        logger.info("Market CLOSED - showing last known prices")
+        
+        for stock in stocks:
+            stock_dict = {
+                'id': stock.id,
+                'symbol': stock.symbol,
+                'name': stock.name,
+                'sector': stock.sector,
+                'current_price': float(stock.current_price) if stock.current_price else 0,
+                'change': 0,
+                'price_source': 'last_known',
+                'last_updated': stock.last_updated
+            }
+            response_data['stocks'].append(stock_dict)
+        
+        # Add market closed message
+        response_data['message'] = "Market is currently closed. Showing last known prices."
+        
+        return Response(response_data)
 class PortfolioView(APIView):
     """
     GET: Returns user's portfolio details
@@ -193,7 +236,8 @@ class BuyOrderView(APIView):
             )
         
         # === STEP 2: CHECK MARKET HOURS (Optional but recommended) ===
-        if not is_market_open():
+        market_status = NepseClient.get_market_status()
+        if market_status and not market_status.get('isOpen', False):
             return Response({
                 "warning": "Market is currently closed. Order will be processed when market opens.",
                 "market_hours": "NEPSE: Sunday-Thursday, 11:00 AM - 3:00 PM NPT"
@@ -401,13 +445,14 @@ class SellOrderView(APIView):
         symbol = request.data.get('symbol', '').upper()
         quantity = int(request.data.get('quantity', 0))
         
-        # ========== VALIDATION ==========
+        # ========== VALIDATION FIRST (always check these) ==========
         if quantity <= 0:
             return Response(
                 {"error": "Quantity must be greater than 0"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Check if user owns this stock FIRST
         try:
             holding = Holding.objects.get(
                 user=user, 
@@ -425,26 +470,45 @@ class SellOrderView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # ========== THEN CHECK MARKET HOURS ==========
+        market_status = NepseClient.get_market_status()
+        
+        # If market is explicitly closed, block the trade
+        if market_status and not market_status.get('isOpen', False):
+            return Response({
+                "warning": "Market is currently closed. Orders can only be placed during market hours.",
+                "market_hours": market_status.get('marketHours', "NEPSE: Sunday-Thursday, 11:00 AM - 3:00 PM NPT"),
+                "current_time": market_status.get('currentTime')
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
         # ========== GET CURRENT PRICE ==========
-        stock = holding.stock
-        current_price = stock.current_price
+        # Try to get live price, fallback to database price
+        price_data = NepseClient.get_stock_price(symbol)
+        
+        if price_data and price_data.get('price'):
+            current_price = price_data['price']
+            price_source = 'live'
+        else:
+            # Fallback to database price
+            stock = holding.stock
+            current_price = stock.current_price
+            price_source = 'database'
+            logger.warning(f"Using database price for sell order: {symbol}")
+        
         total_value = current_price * quantity
         
         # ========== CREATE SELL TRADE ==========
         trade = Trade.objects.create(
             user=user,
-            stock=stock,
+            stock=holding.stock,
             quantity=quantity,
             price_per_share=current_price,
             order_type=Trade.OrderType.SELL,
             total_amount=total_value
         )
         
-        # ========== USE YOUR MODEL'S METHOD ==========
-        # This is the KEY - use the method you already created!
+        # ========== UPDATE HOLDINGS ==========
         holding.update_after_sell(quantity, current_price)
-        # Note: You don't need to update current_value or profit_loss
-        # They're properties that calculate automatically!
         
         # ========== UPDATE CASH BALANCE ==========
         portfolio = user.portfolio
@@ -452,9 +516,7 @@ class SellOrderView(APIView):
         portfolio.save()
         
         # ========== CHECK IF HOLDING STILL EXISTS ==========
-        # After update_after_sell, holding might be deleted if quantity became 0
         try:
-            # Try to get the holding again
             updated_holding = Holding.objects.get(
                 user=user, 
                 stock__symbol=symbol
@@ -463,20 +525,20 @@ class SellOrderView(APIView):
             new_avg_price = float(updated_holding.average_buy_price)
             new_total_invested = float(updated_holding.total_invested)
         except Holding.DoesNotExist:
-            # Holding was deleted (all shares sold)
             remaining_shares = 0
             new_avg_price = 0
             new_total_invested = 0
         
         # ========== RETURN RESPONSE ==========
-        return Response({
+        response_data = {
             "success": True,
             "message": f"Successfully sold {quantity} shares of {symbol}",
             "data": {
                 "symbol": symbol,
-                "company_name": stock.name,
+                "company_name": holding.stock.name,
                 "quantity_sold": quantity,
                 "price_per_share": float(current_price),
+                "price_source": price_source,
                 "total_received": float(total_value),
                 "remaining_balance": float(portfolio.cash_balance),
                 "remaining_shares": remaining_shares,
@@ -485,7 +547,17 @@ class SellOrderView(APIView):
                 "trade_id": trade.id,
                 "timestamp": trade.timestamp.isoformat()
             }
-        }, status=status.HTTP_200_OK)
+        }
+        
+        # Add warning if using database price
+        if price_source == 'database':
+            response_data["warning"] = "Price may be delayed. Using last known price from database."
+        
+        # If API is down, add a note
+        if market_status is None:
+            response_data["note"] = "Market status could not be verified. Trade processed with caution."
+        
+        return Response(response_data, status=status.HTTP_200_OK)
         
 class TradeHistoryView(APIView):
     """
@@ -673,10 +745,10 @@ class MarketStatusView(APIView):
     
     def _fallback_market_status(self):
         """Fallback method when API is unavailable"""
-        from services.market_hours import is_market_open
+        from services.market_hours import get_market_status
         
         nepali_time = datetime.datetime.now(pytz.timezone('Asia/Kathmandu'))
-        is_open = is_market_open()
+        is_open = get_market_status()
         
         return Response({
             'is_open': is_open,

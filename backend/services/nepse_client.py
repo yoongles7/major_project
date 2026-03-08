@@ -7,7 +7,7 @@ import pytz
 logger = logging.getLogger(__name__)
 
 class NepseClient:
-    BASE_URL = "http://localhost:8000"
+    BASE_URL = "http://localhost:8003"
     
     # Mock data for when API is down/market closed
     MOCK_PRICES = {
@@ -29,20 +29,53 @@ class NepseClient:
     }
     
     @classmethod
-    def is_market_open(cls):
+    def get_market_status(cls):
         """Check if NEPSE market is currently open"""
-        nepali_tz = pytz.timezone('Asia/Kathmandu')
-        now = datetime.now(nepali_tz)
+        cache_key = 'nepse_market_status'
         
-        # NEPSE: Sunday (6) to Thursday (3), 11:00-15:00
-        day = now.weekday()
-        if day > 4 or day == 5:  # Friday(4) or Saturday(5)
-            return False
+        # Try cache first
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
         
-        market_open = datetime.strptime("11:00", "%H:%M").time()
-        market_close = datetime.strptime("15:00", "%H:%M").time()
+        try:
+            # FIX 2: Use correct endpoint
+            response = requests.get(
+                f"{cls.BASE_URL}/IsNepseOpen",
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # FIX 3: Handle the response format
+                # API returns: {"isOpen": "CLOSE", "asOf": "2026-03-03T15:00:00", "id": 80}
+                
+                # Check if market is open (could be "OPEN" or "open" or True)
+                is_open_status = data.get('isOpen', 'CLOSE')
+                
+                # Convert string to boolean
+                is_open = str(is_open_status).upper() == "OPEN"
+                
+                # Format the response nicely
+                result = {
+                    'isOpen': is_open,
+                    'message': f"Market is {'OPEN' if is_open else 'CLOSED'}",
+                    'currentTime': data.get('asOf'),
+                    'marketHours': 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT'
+                }
+                
+                # Cache for 60 seconds
+                cache.set(cache_key, result, 60)
+                
+                return result
+                
+        except requests.exceptions.ConnectionError:
+            logger.error(f"Cannot connect to NEPSE API at {cls.BASE_URL}")
+        except Exception as e:
+            logger.error(f"Failed to fetch market status: {e}")
         
-        return market_open <= now.time() <= market_close
+        return None
     
     @classmethod
     def get_live_prices(cls):

@@ -9,6 +9,12 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from decimal import Decimal
 from .utils import update_holdings_after_buy, can_user_afford, validate_buy_order
+from services.nepse_client import NepseClient
+import logging
+import datetime
+import pytz
+
+logger = logging.getLogger(__name__)
 
 def index(request):
     return HttpResponse("Hello, This is trading UI!")
@@ -151,19 +157,6 @@ class HoldingsListView(APIView):
             }
         })
         
-# trading/views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from django.db import transaction
-from trading.models import Stock, Trade, Portfolio, Holding
-from services.nepse_client import NepseClient
-from services.price_updater import update_stock_price
-from services.market_hours import is_market_open
-import logging
-
-logger = logging.getLogger(__name__)
 
 class BuyOrderView(APIView):
     """
@@ -658,17 +651,39 @@ class CurrentPriceView(APIView):
         return Response(live_data or [])
     
 class MarketStatusView(APIView):
-    """Check if market is open"""
+    """Check if market is open using NEPSE API"""
     
     def get(self, request):
+        # Try to get status from NEPSE API
+        market_status = NepseClient.get_market_status()
+        
+        if market_status:
+            # API returned data, use it
+            return Response({
+                'is_open': market_status.get('isOpen', False),
+                'message': market_status.get('message', ''),
+                'current_time': market_status.get('currentTime'),
+                'market_hours': market_status.get('marketHours', 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT'),
+                'source': 'NEPSE API',
+                'api_status': 'connected'
+            })
+        else:
+            # API failed, use fallback calculation
+            return self._fallback_market_status()
+    
+    def _fallback_market_status(self):
+        """Fallback method when API is unavailable"""
         from services.market_hours import is_market_open
-        import datetime
-        import pytz
         
         nepali_time = datetime.datetime.now(pytz.timezone('Asia/Kathmandu'))
+        is_open = is_market_open()
         
         return Response({
-            'is_open': is_market_open(),
+            'is_open': is_open,
+            'message': f"Market is {'OPEN' if is_open else 'CLOSED'} (calculated)",
             'current_time': nepali_time.isoformat(),
-            'market_hours': 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT'
+            'market_hours': 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT',
+            'source': 'local calculation',
+            'api_status': 'disconnected',
+            'api_url': NepseClient.BASE_URL  # Show which URL we're trying
         })

@@ -730,14 +730,31 @@ class MarketStatusView(APIView):
         market_status = NepseClient.get_market_status()
         
         if market_status:
-            # API returned data, use it
+            # Determine badge color for frontend
+            if market_status['is_open']:
+                badge_color = "green"
+                badge_text = "OPEN"
+            elif market_status['is_halted']:
+                badge_color = "orange"
+                badge_text = "HALTED"
+            else:
+                badge_color = "red"
+                badge_text = "CLOSED"
+            
             return Response({
-                'is_open': market_status.get('isOpen', False),
-                'message': market_status.get('message', ''),
-                'current_time': market_status.get('currentTime'),
-                'market_hours': market_status.get('marketHours', 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT'),
-                'source': 'NEPSE API',
-                'api_status': 'connected'
+                'status': market_status['status'],
+                'badge': {
+                    'color': badge_color,
+                    'text': badge_text
+                },
+                'is_open': market_status['is_open'],
+                'is_halted': market_status['is_halted'],
+                'is_closed': market_status['is_closed'],
+                'trading_allowed': market_status['trading_allowed'],
+                'message': market_status['message'],
+                'current_time': market_status['current_time'],
+                'market_hours': market_status['market_hours'],
+                'source': 'NEPSE API'
             })
         else:
             # API failed, use fallback calculation
@@ -745,17 +762,23 @@ class MarketStatusView(APIView):
     
     def _fallback_market_status(self):
         """Fallback method when API is unavailable"""
-        from services.market_hours import get_market_status
+        from services.market_hours import is_market_open
         
         nepali_time = datetime.datetime.now(pytz.timezone('Asia/Kathmandu'))
-        is_open = get_market_status()
+        is_open = is_market_open()
         
         return Response({
+            'status': 'OPEN' if is_open else 'CLOSED',
+            'badge': {
+                'color': 'green' if is_open else 'red',
+                'text': 'OPEN' if is_open else 'CLOSED'
+            },
             'is_open': is_open,
-            'message': f"Market is {'OPEN' if is_open else 'CLOSED'} (calculated)",
+            'is_halted': False,
+            'is_closed': not is_open,
+            'trading_allowed': is_open,
+            'message': f"Market is {'OPEN' if is_open else 'CLOSED'} (estimated)",
             'current_time': nepali_time.isoformat(),
             'market_hours': 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT',
-            'source': 'local calculation',
-            'api_status': 'disconnected',
-            'api_url': NepseClient.BASE_URL  # Show which URL we're trying
+            'source': 'local calculation (API unavailable)'
         })

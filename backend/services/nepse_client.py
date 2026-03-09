@@ -3,8 +3,16 @@ import logging
 from django.core.cache import cache
 from datetime import datetime
 import pytz
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+class MarketStatus(Enum):
+    """Enum for market status values"""
+    OPEN = "OPEN"
+    CLOSED = "CLOSE"
+    HALTED = "HALT"
+    UNKNOWN = "UNKNOWN"
 
 class NepseClient:
     BASE_URL = "http://localhost:8003"
@@ -39,7 +47,6 @@ class NepseClient:
             return cached
         
         try:
-            # FIX 2: Use correct endpoint
             response = requests.get(
                 f"{cls.BASE_URL}/IsNepseOpen",
                 timeout=5
@@ -48,26 +55,47 @@ class NepseClient:
             if response.status_code == 200:
                 data = response.json()
                 
-                # FIX 3: Handle the response format
-                # API returns: {"isOpen": "CLOSE", "asOf": "2026-03-03T15:00:00", "id": 80}
+                # Get raw status from API
+                raw_status = data.get('isOpen', 'UNKNOWN').upper()
                 
-                # Check if market is open (could be "OPEN" or "open" or True)
-                is_open_status = data.get('isOpen', 'CLOSE')
+                # Convert to our enum
+                status = MarketStatus.UNKNOWN
+                message = ""
+                trading_allowed = False
                 
-                # Convert string to boolean
-                is_open = str(is_open_status).upper() == "OPEN"
+                if raw_status == "OPEN":
+                    status = MarketStatus.OPEN
+                    message = "Market is OPEN for trading"
+                    trading_allowed = True
+                elif raw_status == "CLOSE":
+                    status = MarketStatus.CLOSED
+                    message = "Market is CLOSED"
+                    trading_allowed = False
+                elif raw_status == "HALT":
+                    status = MarketStatus.HALTED
+                    message = "Market is HALTED (trading temporarily suspended)"
+                    trading_allowed = False
+                else:
+                    message = f"Unknown market status: {raw_status}"
+                    trading_allowed = False
                 
-                # Format the response nicely
+                # Format the response
                 result = {
-                    'isOpen': is_open,
-                    'message': f"Market is {'OPEN' if is_open else 'CLOSED'}",
-                    'currentTime': data.get('asOf'),
-                    'marketHours': 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT'
+                    'status': status.value,
+                    'is_open': status == MarketStatus.OPEN,
+                    'is_halted': status == MarketStatus.HALTED,
+                    'is_closed': status == MarketStatus.CLOSED,
+                    'trading_allowed': trading_allowed,
+                    'message': message,
+                    'raw_status': raw_status,
+                    'current_time': data.get('asOf'),
+                    'market_hours': 'Sunday-Thursday, 11:00 AM - 3:00 PM NPT'
                 }
                 
                 # Cache for 60 seconds
                 cache.set(cache_key, result, 60)
                 
+                logger.info(f"Market status: {raw_status} at {data.get('asOf')}")
                 return result
                 
         except requests.exceptions.ConnectionError:
@@ -88,6 +116,16 @@ class NepseClient:
             logger.debug("Returning cached live prices")
             return cached
         
+        # First check if market is open/halted
+        market_status = cls.get_market_status()
+        
+        # If market is CLOSED or HALTED, return mock data immediately
+        if market_status and (market_status['is_closed'] or market_status['is_halted']):
+            logger.info(f"Market is {market_status['status']}, using mock data")
+            mock_data = cls.get_mock_prices()
+            cache.set(cache_key, mock_data, 60)
+            return mock_data
+        
         try:
             logger.debug("Fetching live prices from API...")
             response = requests.get(
@@ -97,7 +135,7 @@ class NepseClient:
             
             if response.status_code == 200:
                 data = response.json()
-                logger.info(f"API returned {len(data)} stocks")
+                logger.info(f"API returned {len(data) if data else 0} stocks")
                 
                 if data and len(data) > 0:
                     # Log sample for debugging
@@ -126,19 +164,33 @@ class NepseClient:
         """Get price for specific stock"""
         logger.debug(f"Getting price for {symbol}")
         
+        # First check market status
+        market_status = cls.get_market_status()
+        
+        # If market is CLOSED or HALTED, use mock data
+        if market_status and (market_status['is_closed'] or market_status['is_halted']):
+            logger.debug(f"Market {market_status['status']}, using mock for {symbol}")
+            if symbol in cls.MOCK_PRICES:
+                return {
+                    'price': cls.MOCK_PRICES[symbol]['price'],
+                    'change': cls.MOCK_PRICES[symbol]['change'],
+                    'source': 'mock (market closed/halted)'
+                }
+        
         # Try live data first
         live_data = cls.get_live_prices()
         if live_data:
             for item in live_data:
                 if item.get('symbol') == symbol:
                     price_data = {
-                        'price': item.get('lastTradedPrice'),  # API uses lastTradedPrice
-                        'change': item.get('percentageChange'),  # API uses percentageChange
+                        'price': item.get('lastTradedPrice'),
+                        'change': item.get('percentageChange'),
                         'high': item.get('highPrice'),
                         'low': item.get('lowPrice'),
                         'volume': item.get('totalTradeQuantity'),
                         'open': item.get('openPrice'),
-                        'prev_close': item.get('previousClose')
+                        'prev_close': item.get('previousClose'),
+                        'source': 'live'
                     }
                     logger.debug(f"Found {symbol}: ₹{price_data['price']}")
                     return price_data
@@ -146,7 +198,9 @@ class NepseClient:
         # Fallback to mock data
         if symbol in cls.MOCK_PRICES:
             logger.debug(f"Using mock data for {symbol}")
-            return cls.MOCK_PRICES[symbol]
+            mock_data = cls.MOCK_PRICES[symbol].copy()
+            mock_data['source'] = 'mock'
+            return mock_data
         
         logger.warning(f"No price found for {symbol}")
         return None
@@ -154,31 +208,88 @@ class NepseClient:
     @classmethod
     def get_mock_prices(cls):
         """Return mock prices for testing"""
-        return [
-            {
-                "symbol": k, 
-                "lastTradedPrice": v['price'], 
+        mock_list = []
+        for k, v in cls.MOCK_PRICES.items():
+            mock_list.append({
+                "symbol": k,
+                "lastTradedPrice": v['price'],
                 "percentageChange": v['change'],
-                "companyName": f"{k} Company"
-            }
-            for k, v in cls.MOCK_PRICES.items()
-        ]
+                "companyName": f"{k} Company",
+                "source": "mock"
+            })
+        return mock_list
     
     @classmethod
     def get_stock_list(cls):
         """Get list of all stocks"""
+        cache_key = 'nepse_stock_list'
+        
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+        
         try:
             response = requests.get(
                 f"{cls.BASE_URL}/CompanyList",
                 timeout=10
             )
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+                cache.set(cache_key, data, 3600)  # Cache for 1 hour
+                return data
         except Exception as e:
             logger.error(f"Failed to fetch stock list: {e}")
         
         # Return mock stock list
-        return [
+        mock_list = [
             {"symbol": k, "companyName": f"{k} Company", "sectorName": "Various"}
             for k in cls.MOCK_PRICES.keys()
         ]
+        cache.set(cache_key, mock_list, 3600)
+        return mock_list
+    
+    @classmethod
+    def get_market_summary(cls):
+        """Get market summary (top gainers, losers, etc)"""
+        try:
+            response = requests.get(
+                f"{cls.BASE_URL}/Summary",
+                timeout=5
+            )
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch market summary: {e}")
+        
+        return None
+    
+    @classmethod
+    def get_top_gainers(cls, limit=5):
+        """Get top gaining stocks"""
+        summary = cls.get_market_summary()
+        if summary and 'topGainers' in summary:
+            return summary['topGainers'][:limit]
+        return []
+    
+    @classmethod
+    def get_top_losers(cls, limit=5):
+        """Get top losing stocks"""
+        summary = cls.get_market_summary()
+        if summary and 'topLosers' in summary:
+            return summary['topLosers'][:limit]
+        return []
+    
+    @classmethod
+    def get_nepse_index(cls):
+        """Get current NEPSE index"""
+        try:
+            response = requests.get(
+                f"{cls.BASE_URL}/NepseIndex",
+                timeout=5
+            )
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch NEPSE index: {e}")
+        
+        return None

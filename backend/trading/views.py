@@ -1,6 +1,7 @@
 from django.http import HttpResponse
 from django.db import transaction
 from django.utils import timezone
+from django.conf import settings
 from .models import Stock, Portfolio, Trade, Holding
 from .serializers import StockSerializer, PortfolioSerializer, TradeSerializer, HoldingSerializer
 from rest_framework.views import APIView

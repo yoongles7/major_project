@@ -46,10 +46,10 @@ Authorization: Bearer <your_access_token>
    ```
    {
     "user": {
-        "id": 1,
-        "username": "john_doe",
-        "email": "john@example.com",
-        "virtual_balance": 100000.00
+        "email": "pritikas@gmail.com",
+        "username": "yoongles",
+        "password": "Katsuki0420",
+        "password_confirmation": "Katsuki0420"
     },
     "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
@@ -58,8 +58,12 @@ Authorization: Bearer <your_access_token>
     **Error Response (400 Bad Request)**
     ```
     {
-    "username": ["A user with that username already exists."],
-    "password": ["This password is too common."]
+    "username": [
+        "A user with that username already exists."
+    ],
+    "email": [
+        "user with this email already exists."
+    ]
     }
     ```
 
@@ -80,6 +84,13 @@ Authorization: Bearer <your_access_token>
    }
    ```
 
+   **Error Response (401 Unauthorized)**
+   ```
+   {
+    "detail": "No active account found with the given credentials"
+   }
+   ```
+
 3. ### /users_authentication/refresh/ : Refresh token when expired
     
    **Request**
@@ -92,6 +103,13 @@ Authorization: Bearer <your_access_token>
    ```
    {
     "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+   }
+   ```
+   **Error Response (401 Unauthorized)**
+   ```
+   {
+    "detail": "Token is invalid",
+    "code": "token_not_valid"
    }
    ```
 
@@ -139,9 +157,11 @@ Authorization: Bearer <your_access_token>
    **Sucess Response (200 OK)**
    ```
    {
-    "symbol": "SCB",
-    "price": 650.25,
+    {
+    "symbol": "BNL",
+    "price": 15657.0,
     "change": 0.0
+    }
    }
    ```
 
@@ -197,17 +217,14 @@ Authorization: Bearer <your_access_token>
     2. Market Closed (400 Bad Request)
     ```
     {
-    "error": "Market is closed",
-    "message": "Trading is only allowed during NEPSE hours: Sun-Thu 11:00 AM - 3:00 PM",
-    "next_open": "2024-01-16T11:00:00Z",
-    "code": "market_closed"
+    "warning": "Market is currently closed. Order will be processed when market opens.",
+    "market_hours": "NEPSE: Sunday-Thursday, 11:00 AM - 3:00 PM NPT"
     }
     ```
     3. Invalid Quantity (400 Bad Request)
     ```
     {
-    "error": "Quantity must be greater than 0",
-    "code": "invalid_quantity"
+    "error": "Quantity must be greater than 0"
     }
     ```
 
@@ -251,8 +268,7 @@ Authorization: Bearer <your_access_token>
     1. No Holdings (400 Bad Request)
     ```
     {
-    "error": "You don't own any shares of NIC",
-    "code": "no_holdings"
+    "error": "You don't own any shares of NIC"
     }
     ```
     2. Insufficient Shares (400 Bad Request)
@@ -288,7 +304,7 @@ Authorization: Bearer <your_access_token>
     }
     ```
 
-4. ### /trading/holdings/{symbol}/ : Get user's holdings
+4. ### /trading/holdings/{symbol}/ : Get golding details
    
    Headers**
    ```
@@ -430,8 +446,18 @@ Authorization: Bearer <your_access_token>
    **Success Response (200 OK)**
    ```
    {
-    "is_open": false,
-    "current_time": "2026-03-02T18:22:49.525687+05:45",
-    "market_hours": "Sunday-Thursday, 11:00 AM - 3:00 PM NPT"
-   }
+    "status": "OPEN",
+    "badge": {
+        "color": "green",
+        "text": "OPEN"
+    },
+    "is_open": true,
+    "is_halted": false,
+    "is_closed": false,
+    "trading_allowed": true,
+    "message": "Market is OPEN (estimated)",
+    "current_time": "2026-03-10T13:34:26.382193+05:45",
+    "market_hours": "Sunday-Thursday, 11:00 AM - 3:00 PM NPT",
+    "source": "local calculation (API unavailable)"
+    }
    ```

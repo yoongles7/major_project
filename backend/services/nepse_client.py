@@ -293,3 +293,109 @@ class NepseClient:
             logger.error(f"Failed to fetch NEPSE index: {e}")
         
         return None
+    
+    @classmethod
+    def get_intraday_data(cls, symbol, days=1):
+        """
+        Get intraday candlestick data for chart
+        This is what your frontend needs for the landing page chart
+        """
+        cache_key = f'intraday_{symbol}_{days}'
+        
+        # Check cache first
+        cached = cache.get(cache_key)
+        if cached:
+            logger.debug(f"Returning cached intraday data for {symbol}")
+            return cached
+        
+        # Check market status
+        market_status = cls.get_market_status()
+        
+        try:
+            # Try to get from API
+            response = requests.get(
+                f"{cls.BASE_URL}/stockIntraday",
+                params={
+                    'symbol': symbol,
+                    'days': days if days > 1 else None  # API might expect different param
+                },
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Format for candlestick chart
+                formatted_data = []
+                for item in data:
+                    # Handle different possible date formats
+                    date_str = item.get('date') or item.get('time') or item.get('timestamp')
+                    
+                    formatted_data.append({
+                        'time': date_str,
+                        'open': float(item.get('open', 0)),
+                        'high': float(item.get('high', 0)),
+                        'low': float(item.get('low', 0)),
+                        'close': float(item.get('close', 0)),
+                        'volume': int(item.get('volume', 0))
+                    })
+                
+                # Sort by time
+                formatted_data.sort(key=lambda x: x['time'])
+                
+                # Cache appropriately
+                if market_status and market_status['is_open']:
+                    cache_timeout = 30  # 30 seconds when market open
+                else:
+                    cache_timeout = 300  # 5 minutes when market closed
+                
+                cache.set(cache_key, formatted_data, cache_timeout)
+                logger.info(f"Got intraday data for {symbol}: {len(formatted_data)} points")
+                return formatted_data
+                
+        except requests.exceptions.ConnectionError:
+            logger.error(f"Cannot connect to NEPSE API at {cls.BASE_URL}")
+        except Exception as e:
+            logger.error(f"Failed to fetch intraday for {symbol}: {e}")
+        
+        # Generate mock intraday data if API fails
+        logger.info(f"Generating mock intraday data for {symbol}")
+        mock_data = cls.generate_mock_intraday(symbol, days)
+        cache.set(cache_key, mock_data, 300)  # Cache mock data for 5 minutes
+        return mock_data
+
+    @classmethod
+    def generate_mock_intraday(cls, symbol, days=1):
+        """Generate mock candlestick data for testing"""
+        import random
+        from datetime import datetime, timedelta
+        
+        mock_data = []
+        now = datetime.now()
+        
+        # Get base price from mock prices or use default
+        base_price = cls.MOCK_PRICES.get(symbol, {}).get('price', 400)
+        
+        # Generate data points (one per hour for demonstration)
+        for day in range(days):
+            for hour in range(10, 15):  # 10 AM to 3 PM
+                time_point = now - timedelta(days=days-day-1, hours=14-hour)
+                
+                # Random walk price
+                open_price = base_price + random.uniform(-5, 5)
+                close_price = open_price + random.uniform(-8, 8)
+                high_price = max(open_price, close_price) + random.uniform(0, 3)
+                low_price = min(open_price, close_price) - random.uniform(0, 3)
+                
+                mock_data.append({
+                    'time': time_point.strftime('%Y-%m-%d %H:%M:%S'),
+                    'open': round(open_price, 2),
+                    'high': round(high_price, 2),
+                    'low': round(low_price, 2),
+                    'close': round(close_price, 2),
+                    'volume': random.randint(1000, 10000)
+                })
+                
+                base_price = close_price  # Next candle starts where previous ended
+        
+        return mock_data

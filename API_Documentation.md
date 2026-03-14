@@ -441,7 +441,7 @@ Authorization: Bearer <your_access_token>
 
 ## Market Data Endpoints
 
-1. ### /trading/market-status/ : Get live market status
+1. ### /market-data/status/ : Get live market status
 
    **Success Response (200 OK)**
    ```
@@ -461,3 +461,7 @@ Authorization: Bearer <your_access_token>
     "source": "local calculation (API unavailable)"
     }
    ```
+
+2. ### /market-data/prices/ : Get live prices
+
+   **Success Response (200 OK)**

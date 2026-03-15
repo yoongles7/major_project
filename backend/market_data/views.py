@@ -5,8 +5,39 @@ from services.nepse_client import NepseClient
 import logging
 import datetime
 import pytz
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Helper function for Nepal time conversion
+def to_nepal_time(dt_str=None):
+    """
+    Convert datetime to Nepal time (UTC+5:45)
+    If no input, returns current Nepal time
+    """
+    nepali_tz = pytz.timezone('Asia/Kathmandu')
+    
+    if dt_str is None:
+        return datetime.now(nepali_tz)
+    
+    try:
+        # Try to parse the datetime string
+        if isinstance(dt_str, str):
+            try:
+                dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+        else:
+            dt = dt_str
+        
+        # Convert to Nepal time
+        if dt.tzinfo is None:
+            dt = pytz.UTC.localize(dt)
+        
+        return dt.astimezone(nepali_tz)
+    except Exception as e:
+        logger.error(f"Error converting to Nepal time: {e}")
+        return datetime.now(nepali_tz)
 
 class MarketStatusView(APIView):
     """Check if market is open using NEPSE API"""
@@ -84,7 +115,21 @@ class StockPriceView(APIView):
     def get(self, request, symbol):
         price_data = NepseClient.get_stock_price(symbol.upper())
         if price_data:
-            return Response(price_data)
+            # Add market status and Nepal time
+            market_status = NepseClient.get_market_status()
+            
+            # Get current Nepal time
+            nepali_time = to_nepal_time()
+            
+            return Response({
+                **price_data,
+                'market_status': {
+                    'is_open': market_status.get('is_open') if market_status else False,
+                    'message': market_status.get('message') if market_status else 'Market status unknown'
+                },
+                'nepal_time': nepali_time.isoformat(),
+                'last_updated': datetime.now().isoformat()
+            })
         return Response({'error': 'Stock not found'}, status=404)
 
 class IntradayChartView(APIView):
@@ -104,11 +149,36 @@ class IntradayChartView(APIView):
         # Get market status to include in response
         market_status = NepseClient.get_market_status()
         
+        # Convert timestamps to Nepal time (UTC+5:45)
+        formatted_data = []
+        for item in chart_data:
+            dt_nepal = to_nepal_time(item.get('time'))
+            
+            # Format in a nice readable format
+            if days > 1:
+                # For multiple days, show date and time
+                time_str = dt_nepal.strftime('%b %d, %H:%M')
+            else:
+                # For single day, just show time
+                time_str = dt_nepal.strftime('%H:%M')
+            
+            formatted_item = {
+                'time': time_str,
+                'timestamp': dt_nepal.isoformat(),
+                'open': item.get('open', 0),
+                'high': item.get('high', 0),
+                'low': item.get('low', 0),
+                'close': item.get('close', 0),
+                'volume': item.get('volume', 0)
+            }
+            formatted_data.append(formatted_item)
+        
         return Response({
             'symbol': symbol,
             'market_status': market_status,
-            'data': chart_data,
-            'data_points': len(chart_data)
+            'data': formatted_data,
+            'data_points': len(formatted_data),
+            'timezone': 'Asia/Kathmandu (NPT)'
         })
 
 class StockSearchView(APIView):
@@ -138,9 +208,56 @@ class MarketSummaryView(APIView):
         summary = NepseClient.get_market_summary()
         nepse_index = NepseClient.get_nepse_index()
         
+        # Get top gainers and losers - ensure we get actual data
+        top_gainers = NepseClient.get_top_gainers(5)
+        top_losers = NepseClient.get_top_losers(5)
+        
+        # If they're None or empty, try to extract from live data
+        if not top_gainers or len(top_gainers) == 0:
+            live_data = NepseClient.get_live_prices()
+            if live_data:
+                # Sort by percentageChange descending for gainers
+                sorted_by_change = sorted(
+                    live_data, 
+                    key=lambda x: float(x.get('percentageChange', 0)), 
+                    reverse=True
+                )
+                top_gainers = [
+                    {
+                        'symbol': item['symbol'],
+                        'companyName': item.get('securityName', item['symbol']),
+                        'lastTradedPrice': item['lastTradedPrice'],
+                        'percentageChange': item['percentageChange'],
+                        'volume': item.get('totalTradeQuantity', 0)
+                    }
+                    for item in sorted_by_change[:5] 
+                    if float(item.get('percentageChange', 0)) > 0
+                ]
+        
+        if not top_losers or len(top_losers) == 0:
+            live_data = NepseClient.get_live_prices()
+            if live_data:
+                # Sort by percentageChange ascending for losers
+                sorted_by_change = sorted(
+                    live_data, 
+                    key=lambda x: float(x.get('percentageChange', 0))
+                )
+                top_losers = [
+                    {
+                        'symbol': item['symbol'],
+                        'companyName': item.get('securityName', item['symbol']),
+                        'lastTradedPrice': item['lastTradedPrice'],
+                        'percentageChange': item['percentageChange'],
+                        'volume': item.get('totalTradeQuantity', 0)
+                    }
+                    for item in sorted_by_change[:5] 
+                    if float(item.get('percentageChange', 0)) < 0
+                ]
+        
         return Response({
             'summary': summary,
             'nepse_index': nepse_index,
-            'top_gainers': NepseClient.get_top_gainers(5),
-            'top_losers': NepseClient.get_top_losers(5)
+            'top_gainers': top_gainers,
+            'top_losers': top_losers,
+            'last_updated': to_nepal_time().isoformat()
         })

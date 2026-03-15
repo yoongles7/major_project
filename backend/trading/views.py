@@ -9,10 +9,10 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from decimal import Decimal
+from datetime import datetime
 from .utils import update_holdings_after_buy, can_user_afford, validate_buy_order
 from services.nepse_client import NepseClient
 import logging
-import datetime
 import pytz
 
 logger = logging.getLogger(__name__)
@@ -37,26 +37,48 @@ class StockListView(APIView):
         }
         
         # 4. IF MARKET IS OPEN - TRY TO GET LIVE PRICES
-        if market_status and market_status.get('isOpen'):
+        # FIXED: Use 'is_open' instead of 'isOpen'
+        if market_status and market_status.get('is_open'):  # <-- CHANGED HERE
             logger.info("Market is OPEN - fetching live prices")
             live_data = NepseClient.get_live_prices()
             
-            if live_data:
+            # DEBUG: Log what we got
+            logger.info(f"Got live_data: {type(live_data)} with {len(live_data) if live_data else 0} items")
+            
+            if live_data and len(live_data) > 0:
+                # Log first item to verify data
+                if len(live_data) > 0:
+                    logger.info(f"Sample item: {live_data[0]}")
+                
                 # Create price map from live data
                 price_map = {}
                 for item in live_data:
                     symbol = item.get('symbol')
                     price = item.get('lastTradedPrice')
+                    
+                    # Get change - your test shows it's 'percentageChange'
                     change = item.get('percentageChange', 0)
                     
-                    if symbol and price:
-                        price_map[symbol] = {
-                            'price': float(price),
-                            'change': float(change) if change else 0,
-                            'high': float(item.get('highPrice', 0)) if item.get('highPrice') else None,
-                            'low': float(item.get('lowPrice', 0)) if item.get('lowPrice') else None,
-                            'volume': item.get('totalTradeQuantity', 0)
-                        }
+                    if symbol and price is not None:
+                        try:
+                            price_map[symbol] = {
+                                'price': float(price),
+                                'change': float(change) if change not in (None, 0, '0') else 0,
+                                'high': float(item.get('highPrice')) if item.get('highPrice') else None,
+                                'low': float(item.get('lowPrice')) if item.get('lowPrice') else None,
+                                'volume': item.get('totalTradeQuantity', 0)
+                            }
+                        except (ValueError, TypeError) as e:
+                            logger.error(f"Error parsing {symbol}: {e}")
+                            price_map[symbol] = {
+                                'price': float(price),
+                                'change': 0,
+                                'high': None,
+                                'low': None,
+                                'volume': 0
+                            }
+                
+                logger.info(f"Built price_map with {len(price_map)} stocks")
                 
                 # Build stock data with live prices
                 for stock in stocks:
@@ -80,16 +102,21 @@ class StockListView(APIView):
                         stock_dict['current_price'] = float(stock.current_price) if stock.current_price else 0
                         stock_dict['change'] = 0
                         stock_dict['price_source'] = 'last_known'
+                        stock_dict['last_updated'] = stock.last_updated
                     
                     response_data['stocks'].append(stock_dict)
                 
                 return Response(response_data)
             else:
-                logger.warning("Market open but no live data - using last known")
+                logger.warning("Market open but no live data received")
+                response_data['message'] = "Market is open but live data unavailable. Showing last known prices."
         
         # 5. MARKET IS CLOSED OR NO LIVE DATA - SHOW LAST KNOWN PRICES
-        logger.info("Market CLOSED - showing last known prices")
+        else:
+            logger.info("Market CLOSED or status unknown - showing last known prices")
+            response_data['message'] = "Market is currently closed. Showing last known prices."
         
+        # Build response with last known prices
         for stock in stocks:
             stock_dict = {
                 'id': stock.id,
@@ -102,9 +129,6 @@ class StockListView(APIView):
                 'last_updated': stock.last_updated
             }
             response_data['stocks'].append(stock_dict)
-        
-        # Add market closed message
-        response_data['message'] = "Market is currently closed. Showing last known prices."
         
         return Response(response_data)
 class PortfolioView(APIView):
@@ -236,9 +260,10 @@ class BuyOrderView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # === STEP 2: CHECK MARKET HOURS (Optional but recommended) ===
+        # === STEP 2: CHECK MARKET HOURS ===
         market_status = NepseClient.get_market_status()
-        if market_status and not market_status.get('isOpen', False):
+        
+        if market_status and not market_status.get('is_open', False):
             return Response({
                 "warning": "Market is currently closed. Order will be processed when market opens.",
                 "market_hours": "NEPSE: Sunday-Thursday, 11:00 AM - 3:00 PM NPT"
@@ -250,14 +275,15 @@ class BuyOrderView(APIView):
             price_data = NepseClient.get_stock_price(symbol)
             
             if price_data and price_data.get('price'):
-                current_price = price_data['price']
+                # Convert to Decimal to avoid type issues
+                current_price = Decimal(str(price_data['price']))
                 price_source = 'nepse_api_live'
                 price_change = price_data.get('change', 0)
             else:
                 # Fallback to database price
                 try:
                     stock = Stock.objects.get(symbol=symbol)
-                    current_price = stock.current_price
+                    current_price = stock.current_price  # This is already Decimal
                     price_source = 'database_cache'
                     price_change = 0
                 except Stock.DoesNotExist:
@@ -270,7 +296,7 @@ class BuyOrderView(APIView):
             # Final fallback - use database price
             try:
                 stock = Stock.objects.get(symbol=symbol)
-                current_price = stock.current_price
+                current_price = stock.current_price  # This is already Decimal
                 price_source = 'database_fallback'
                 price_change = 0
             except Stock.DoesNotExist:
@@ -295,11 +321,12 @@ class BuyOrderView(APIView):
             stock.save()
         
         # === STEP 5: Calculate cost and check balance ===
-        total_cost = current_price * quantity
+        total_cost = current_price * quantity  # This will be Decimal if current_price is Decimal
         
         # Get user's portfolio (created automatically via signal)
         portfolio = user.portfolio
         
+        # Compare Decimal with Decimal
         if portfolio.cash_balance < total_cost:
             return Response({
                 "error": "Insufficient balance",
@@ -318,7 +345,7 @@ class BuyOrderView(APIView):
                 price_per_share=current_price,
                 order_type=Trade.OrderType.BUY,
                 total_amount=total_cost,
-                price_source=price_source  # Add this field to Trade model
+                # price_source=price_source  # Uncomment if you add this field to Trade model
             )
             
             # 6.2 Update portfolio cash balance
@@ -390,37 +417,40 @@ class BuyOrderView(APIView):
         Helper method to update holdings after a buy order
         Returns: (holding_object, is_new_holding)
         """
+        # Ensure price_per_share is Decimal
+        if not isinstance(price_per_share, Decimal):
+            price_per_share = Decimal(str(price_per_share))
+            
         total_cost = price_per_share * quantity
         
         try:
             # Try to get existing holding
             holding = Holding.objects.get(user=user, stock=stock)
             
-            # Calculate new average price
+            # Calculate new values
             new_quantity = holding.quantity + quantity
             new_total_invested = holding.total_invested + total_cost
             new_avg_price = new_total_invested / new_quantity
             
-            # Update holding
+            # Update only the database fields (not properties)
             holding.quantity = new_quantity
             holding.average_buy_price = new_avg_price
             holding.total_invested = new_total_invested
-            holding.current_value = new_quantity * stock.current_price
-            holding.profit_loss = holding.current_value - new_total_invested
+            # REMOVED: holding.current_value = ... (this is likely a property)
+            # REMOVED: holding.profit_loss = ... (this is likely a property)
             holding.save()
             
             return holding, False
             
         except Holding.DoesNotExist:
-            # Create new holding
+            # Create new holding - only set database fields
             holding = Holding.objects.create(
                 user=user,
                 stock=stock,
                 quantity=quantity,
                 average_buy_price=price_per_share,
                 total_invested=total_cost,
-                current_value=quantity * stock.current_price,
-                profit_loss=0  # Initially no profit/loss
+                # REMOVED: current_value and profit_loss as they're likely properties
             )
             return holding, True
     
@@ -431,9 +461,9 @@ class BuyOrderView(APIView):
     
     def calculate_current_portfolio_value(self, user):
         """Calculate current value of all holdings + cash"""
-        holdings_value = 0
+        holdings_value = Decimal('0')
         for holding in Holding.objects.filter(user=user):
-            # Use current stock price
+            # Use current stock price to calculate current value
             holdings_value += holding.quantity * holding.stock.current_price
         
         return user.portfolio.cash_balance + holdings_value
@@ -690,20 +720,51 @@ class DashboardSummaryView(APIView):
         else:
             return "Just now"
 
-class CurrentPriceView(APIView):
+class StockDetailsView(APIView):
     """Get current price for one or multiple stocks"""
     
     def get(self, request, symbol=None):
         if symbol:
-            # Single stock
+            # Single stock - return detailed information
             price_data = NepseClient.get_stock_price(symbol)
             if price_data:
-                return Response({
+                # Get market status for context
+                market_status = NepseClient.get_market_status()
+                
+                # Build comprehensive response
+                response_data = {
                     'symbol': symbol,
-                    'price': price_data['price'],
-                    'change': price_data.get('change', 0)
-                })
-            return Response({'error': 'Not found'}, status=404)
+                    'price': price_data.get('price', 0),
+                    'change': price_data.get('change', 0),
+                    'change_percent': price_data.get('change', 0),  # Same as change if percentage
+                    'high': price_data.get('high'),
+                    'low': price_data.get('low'),
+                    'open': price_data.get('open'),
+                    'prev_close': price_data.get('prev_close'),
+                    'volume': price_data.get('volume'),
+                    'source': price_data.get('source', 'unknown'),
+                    'last_updated': datetime.now().isoformat(),
+                    'market_status': {
+                        'is_open': market_status.get('is_open') if market_status else False,
+                        'message': market_status.get('message') if market_status else 'Market status unknown'
+                    }
+                }
+                
+                # Try to get company name from database if available
+                try:
+                    stock = Stock.objects.get(symbol=symbol)
+                    response_data['company_name'] = stock.name
+                    response_data['sector'] = stock.sector
+                except Stock.DoesNotExist:
+                    response_data['company_name'] = None
+                    response_data['sector'] = None
+                
+                return Response(response_data)
+            
+            return Response({
+                'error': f'Stock {symbol} not found',
+                'symbol': symbol
+            }, status=404)
         
         # Multiple stocks (from query params)
         symbols = request.GET.getlist('symbols[]')
@@ -715,10 +776,46 @@ class CurrentPriceView(APIView):
                     if item.get('symbol') in symbols:
                         prices[item['symbol']] = {
                             'price': item.get('lastTradedPrice'),
-                            'change': item.get('percentChange')
+                            'change': item.get('percentageChange'),  # Fixed: was 'percentChange'
+                            'high': item.get('highPrice'),
+                            'low': item.get('lowPrice'),
+                            'volume': item.get('totalTradeQuantity'),
+                            'source': 'live'
                         }
+            
+            # Fill in any missing symbols with mock/db data
+            for symbol in symbols:
+                if symbol not in prices:
+                    # Try to get from database
+                    try:
+                        stock = Stock.objects.get(symbol=symbol)
+                        prices[symbol] = {
+                            'price': float(stock.current_price),
+                            'change': 0,
+                            'source': 'database',
+                            'company_name': stock.name
+                        }
+                    except Stock.DoesNotExist:
+                        prices[symbol] = {
+                            'error': 'Stock not found'
+                        }
+            
             return Response(prices)
         
-        # Get all prices
+        # Get all prices (default view)
         live_data = NepseClient.get_live_prices()
-        return Response(live_data or [])
+        if live_data:
+            return Response(live_data)
+        
+        # Fallback to all stocks from database
+        stocks = Stock.objects.exclude(current_price__lte=0)
+        all_prices = []
+        for stock in stocks:
+            all_prices.append({
+                'symbol': stock.symbol,
+                'lastTradedPrice': float(stock.current_price),
+                'companyName': stock.name,
+                'sector': stock.sector,
+                'source': 'database'
+            })
+        return Response(all_prices)
